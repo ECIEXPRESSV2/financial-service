@@ -20,6 +20,11 @@ export enum TopupPaymentMethod {
   DAVIPLATA = 'DAVIPLATA',
   PSE = 'PSE',
   CARD = 'CARD',
+  BANCOLOMBIA_TRANSFER = 'BANCOLOMBIA_TRANSFER',
+  BANCOLOMBIA_QR = 'BANCOLOMBIA_QR',
+  // Bre-B está disponible en Wompi solo como QR interoperable desde el widget,
+  // no como payment_method en la API de transacciones. No implementar hasta que
+  // Wompi lo exponga en su API pública.
 }
 
 export enum TopupStatus {
