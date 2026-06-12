@@ -96,6 +96,11 @@ export class WompiService {
     this.logger.debug(`stringToHash: ${stringToHash}`);
     this.logger.debug(`integrity calculada: ${integrity}`);
 
+    const { payment_method, customer_data } = this.buildTransactionExtras(
+      params.paymentMethod,
+      params.paymentData,
+    );
+
     const body = {
       acceptance_token: acceptanceToken,
       amount_in_cents: params.amountInCents,
@@ -103,10 +108,8 @@ export class WompiService {
       customer_email: params.customerEmail,
       reference: params.topupId,
       signature: integrity,
-      payment_method: this.buildPaymentMethod(
-        params.paymentMethod,
-        params.paymentData,
-      ),
+      ...(customer_data && { customer_data }),
+      payment_method,
     };
 
     this.logger.debug(`payload completo: ${JSON.stringify(body)}`);
@@ -148,96 +151,119 @@ export class WompiService {
   }
 
   /**
-   * Valida la firma de un evento de Wompi según la documentación oficial:
-   * se concatenan, en orden, los valores de las propiedades indicadas en
-   * `signature.properties` (rutas tipo "transaction.id"), seguidos del `timestamp`
-   * del evento y del secreto de eventos. El SHA256 (hex en mayúsculas) de esa cadena
-   * debe coincidir con `signature.checksum`.
+   * Valida la firma de un evento de Wompi.
+   * Algoritmo: SHA256( valores_de_properties + timestamp + eventsSecret )
+   * Los valores se sacan de `data` navegando la ruta "transaction.id" → data.transaction.id.
+   * El hash resultante (hex lowercase) debe coincidir exactamente con `signature.checksum`.
    */
-  verifyWebhookSignature(event: WompiWebhookEvent): boolean {
-    if (!event?.signature?.properties || !event.signature.checksum) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  verifyWebhookSignature(body: any): boolean {
+    try {
+      const eventsSecret = this.configService.get<string>('wompi.eventsSecret');
+      const { signature, timestamp, data } = body;
+
+      if (!signature?.checksum || !signature?.properties || !timestamp) {
+        return false;
+      }
+
+      const concatenated = (signature.properties as string[])
+        .map((prop) =>
+          prop.split('.').reduce((obj: any, key: string) => obj?.[key], data),
+        )
+        .join('');
+
+      const stringToHash = `${concatenated}${timestamp}${eventsSecret}`;
+      const calculated = createHash('sha256').update(stringToHash).digest('hex');
+
+      const isValid = calculated === signature.checksum;
+      if (!isValid) {
+        this.logger.warn(
+          `Firma de webhook inválida. stringToHash: ${stringToHash} | calculado: ${calculated} | recibido: ${signature.checksum as string}`,
+        );
+      }
+      return isValid;
+    } catch {
       return false;
     }
-
-    const concatenatedValues = event.signature.properties
-      .map((path) => this.resolveProperty(event.data, path))
-      .join('');
-
-    const stringToHash = `${concatenatedValues}${event.timestamp}${this.eventsSecret}`;
-    const computedChecksum = createHash('sha256')
-      .update(stringToHash)
-      .digest('hex')
-      .toUpperCase();
-
-    const isValid = computedChecksum === event.signature.checksum.toUpperCase();
-    if (!isValid) {
-      this.logger.warn('Firma de webhook de Wompi inválida.');
-    }
-    return isValid;
   }
 
   /**
-   * Resuelve una ruta tipo "transaction.amount_in_cents" dentro de `event.data`.
-   * Las propiedades del checksum vienen relativas al objeto `data`.
+   * Construye `payment_method` y, cuando el método lo requiere, `customer_data`
+   * (PSE lo exige al nivel raíz del payload de la transacción).
+   * NUNCA se reciben datos crudos de tarjeta: solo tokens generados por Wompi.
    */
-  private resolveProperty(data: unknown, path: string): string {
-    const value = path
-      .split('.')
-      .reduce<unknown>(
-        (acc, key) => (acc as Record<string, unknown>)?.[key],
-        data,
-      );
-    switch (typeof value) {
-      case 'string':
-        return value;
-      case 'number':
-      case 'boolean':
-      case 'bigint':
-        return value.toString();
-      case 'undefined':
-        return '';
-      default:
-        return value === null ? '' : JSON.stringify(value);
-    }
-  }
-
-  /**
-   * Construye el objeto `payment_method` según el método. Los datos sensibles
-   * (token de tarjeta, teléfono, datos PSE) los recoge y tokeniza el front y llegan
-   * en `paymentData`. NUNCA se reciben datos crudos de tarjeta: solo tokens de Wompi.
-   */
-  private buildPaymentMethod(
+  private buildTransactionExtras(
     method: TopupPaymentMethod,
     paymentData: Record<string, unknown> = {},
-  ): Record<string, unknown> {
+  ): {
+    payment_method: Record<string, unknown>;
+    customer_data?: Record<string, unknown>;
+  } {
     switch (method) {
       case TopupPaymentMethod.NEQUI:
         return {
-          type: 'NEQUI',
-          phone_number: paymentData.phone_number as string,
+          payment_method: {
+            type: 'NEQUI',
+            phone_number: paymentData.phone_number as string,
+          },
         };
 
       case TopupPaymentMethod.DAVIPLATA:
         return {
-          type: 'DAVIPLATA',
-          phone_number: paymentData.phone_number as string,
+          payment_method: {
+            type: 'DAVIPLATA',
+            phone_number: paymentData.phone_number as string,
+            user_legal_id_type: paymentData.user_legal_id_type as string,
+            user_legal_id: paymentData.user_legal_id as string,
+          },
         };
 
       case TopupPaymentMethod.PSE:
         return {
-          type: 'PSE',
-          user_type: paymentData.user_type,
-          user_legal_id_type: paymentData.user_legal_id_type,
-          user_legal_id: paymentData.user_legal_id,
-          financial_institution_code: paymentData.financial_institution_code,
-          payment_description: 'Recarga billetera ECIExpress',
+          payment_method: {
+            type: 'PSE',
+            user_type: paymentData.user_type,
+            user_legal_id_type: paymentData.user_legal_id_type,
+            user_legal_id: paymentData.user_legal_id,
+            financial_institution_code: paymentData.financial_institution_code,
+            payment_description: 'Recarga billetera ECIExpress',
+          },
+          // PSE requiere customer_data al nivel raíz de la transacción, no dentro de payment_method.
+          customer_data: {
+            phone_number: paymentData.customer_phone as string,
+            full_name: paymentData.customer_full_name as string,
+          },
         };
 
       case TopupPaymentMethod.CARD:
         return {
-          type: 'CARD',
-          token: paymentData.token as string,
-          installments: (paymentData.installments as number) ?? 1,
+          payment_method: {
+            type: 'CARD',
+            token: paymentData.token as string,
+            installments: (paymentData.installments as number) ?? 1,
+          },
+        };
+
+      case TopupPaymentMethod.BANCOLOMBIA_TRANSFER:
+        return {
+          payment_method: {
+            type: 'BANCOLOMBIA_TRANSFER',
+            user_type: 'PERSON',
+            payment_description: 'Recarga billetera ECIExpress',
+            // sandbox_status simula el resultado en sandbox; no enviar en producción.
+            ...(process.env.NODE_ENV !== 'production' && { sandbox_status: 'APPROVED' }),
+          },
+        };
+
+      case TopupPaymentMethod.BANCOLOMBIA_QR:
+        // La respuesta incluye extra.qr_image (base64 SVG). El frontend lo renderiza como:
+        // <img src={`data:image/svg+xml;base64,${wompi.extra.qr_image}`} />
+        return {
+          payment_method: {
+            type: 'BANCOLOMBIA_QR',
+            payment_description: 'Recarga billetera ECIExpress',
+            ...(process.env.NODE_ENV !== 'production' && { sandbox_status: 'APPROVED' }),
+          },
         };
 
       default:
