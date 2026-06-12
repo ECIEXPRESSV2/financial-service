@@ -60,10 +60,6 @@ export class WompiService {
     return this.configService.getOrThrow<string>('wompi.eventsSecret');
   }
 
-  private get integritySecret(): string {
-    return this.configService.getOrThrow<string>('wompi.integritySecret');
-  }
-
   /** GET /merchants/:publicKey → devuelve el acceptance_token vigente. */
   async getAcceptanceToken(): Promise<string> {
     const response = await axios.get<{
@@ -85,11 +81,20 @@ export class WompiService {
   ): Promise<Record<string, unknown>> {
     const acceptanceToken = await this.getAcceptanceToken();
 
-    const integrity = createHash('sha256')
-      .update(
-        `${params.topupId}${params.amountInCents}COP${this.integritySecret}`,
-      )
-      .digest('hex');
+    const integritySecret = this.configService.get<string>('wompi.integritySecret');
+    if (!integritySecret) {
+      this.logger.error('WOMPI_INTEGRITY_SECRET no está configurado');
+      throw new Error('Configuración de Wompi incompleta');
+    }
+
+    const stringToHash = `${params.topupId}${params.amountInCents}COP${integritySecret}`;
+    const integrity = createHash('sha256').update(stringToHash).digest('hex');
+
+    this.logger.debug(`integritySecret presente: ${!!integritySecret}`);
+    this.logger.debug(`reference: ${params.topupId}`);
+    this.logger.debug(`amountInCents: ${params.amountInCents}`);
+    this.logger.debug(`stringToHash: ${stringToHash}`);
+    this.logger.debug(`integrity calculada: ${integrity}`);
 
     const body = {
       acceptance_token: acceptanceToken,
@@ -97,12 +102,14 @@ export class WompiService {
       currency: this.configService.get<string>('wompi.currency') ?? 'COP',
       customer_email: params.customerEmail,
       reference: params.topupId,
-      signature: { integrity },
+      signature: integrity,
       payment_method: this.buildPaymentMethod(
         params.paymentMethod,
         params.paymentData,
       ),
     };
+
+    this.logger.debug(`payload completo: ${JSON.stringify(body)}`);
 
     try {
       const response = await axios.post<{ data: Record<string, any> }>(
