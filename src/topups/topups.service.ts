@@ -80,11 +80,17 @@ export class TopupsService {
       { wompiTransactionId, wompiResponse: wompiData as Record<string, any> },
     );
 
+    const extra = (wompiData?.payment_method as Record<string, unknown>)
+      ?.extra as Record<string, unknown> | undefined;
+
     return {
       topupId: topup.id,
       status: topup.status,
       amount: topup.amount,
       paymentMethod: topup.paymentMethod,
+      // URL donde el usuario debe completar el pago (DAVIPLATA, PSE, BANCOLOMBIA_TRANSFER).
+      // El frontend debe abrirla en una nueva pestaña: window.open(redirectUrl, '_blank').
+      redirectUrl: (extra?.url ?? extra?.async_payment_url ?? null) as string | null,
       wompi: wompiData,
     };
   }
