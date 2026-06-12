@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { execSync, exec } from 'child_process';
@@ -18,9 +19,14 @@ function isBrowserRunning(): boolean {
         stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
       });
-      return /chrome\.exe|msedge\.exe|firefox\.exe|brave\.exe|opera\.exe/i.test(out);
+      return /chrome\.exe|msedge\.exe|firefox\.exe|brave\.exe|opera\.exe/i.test(
+        out,
+      );
     }
-    const out = execSync('ps aux', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const out = execSync('ps aux', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     return /Google Chrome|Safari|firefox|Brave Browser|Chromium/i.test(out);
   } catch {
     return false;
@@ -53,7 +59,11 @@ function openSwaggerIfBrowserOpen(url: string): void {
 
   if (!isBrowserRunning()) return;
 
-  fs.writeFileSync(LOCK_FILE, JSON.stringify({ timestamp: Date.now() }), 'utf-8');
+  fs.writeFileSync(
+    LOCK_FILE,
+    JSON.stringify({ timestamp: Date.now() }),
+    'utf-8',
+  );
   openBrowser(url);
 }
 
@@ -78,6 +88,8 @@ process.on('SIGINT', () => {
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
   const config = new DocumentBuilder()
     .setTitle('Financial Service')
     .setDescription('Financial Service API documentation')
@@ -87,9 +99,9 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 3004;
   await app.listen(port);
 
   openSwaggerIfBrowserOpen(`http://localhost:${port}/api`);
 }
-bootstrap();
+void bootstrap();
