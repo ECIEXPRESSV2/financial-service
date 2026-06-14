@@ -126,6 +126,22 @@ export class TopupsService {
         .catch(() => null);
     }
 
+    // Reconciliación: si Wompi ya aprobó pero el webhook no llegó (común en
+    // sandbox / desarrollo local sin URL pública), acreditamos aquí mismo. Es
+    // idempotente: si ya estaba acreditado, no hace nada.
+    if (
+      wompi?.status === 'APPROVED' &&
+      topup.status === TopupStatus.PENDING &&
+      topup.wompiTransactionId
+    ) {
+      const credited = await this.creditApprovedTopup(
+        topup.id,
+        topup.wompiTransactionId,
+        { transaction: wompi },
+      );
+      if (credited) topup.status = TopupStatus.APPROVED;
+    }
+
     const extra = (wompi?.payment_method as Record<string, any> | undefined)
       ?.extra as Record<string, any> | undefined;
 
@@ -133,7 +149,7 @@ export class TopupsService {
       topupId: topup.id,
       amount: topup.amount,
       paymentMethod: topup.paymentMethod,
-      // Estado local (lo único que mueve el saldo, vía webhook).
+      // Estado local (lo único que mueve el saldo; ya reconciliado arriba).
       status: topup.status,
       // Estado en vivo reportado por Wompi (puede adelantarse al webhook).
       wompiStatus: (wompi?.status as string | undefined) ?? null,
@@ -192,16 +208,29 @@ export class TopupsService {
     }
   }
 
-  /**
-   * Acredita el saldo de forma atómica e idempotente. El UPDATE condicional
-   * `status = PENDING → APPROVED` actúa como cerrojo: si dos webhooks llegan a la vez,
-   * solo uno afecta una fila y solo ese acredita el saldo y publica el evento.
-   */
   private async approveTopup(
     topupId: string,
     wompiTransactionId: string,
     event: WompiWebhookEvent,
   ): Promise<void> {
+    await this.creditApprovedTopup(
+      topupId,
+      wompiTransactionId,
+      event.data as unknown as Record<string, any>,
+    );
+  }
+
+  /**
+   * Acredita el saldo de forma atómica e idempotente. El UPDATE condicional
+   * `status = PENDING → APPROVED` actúa como cerrojo: si dos llamadas concurren
+   * (webhook + reconciliación), solo una afecta la fila y solo esa acredita el
+   * saldo y publica el evento.
+   */
+  private async creditApprovedTopup(
+    topupId: string,
+    wompiTransactionId: string,
+    wompiResponse: Record<string, any>,
+  ): Promise<boolean> {
     let credited = false;
     let amount = 0;
 
@@ -212,7 +241,7 @@ export class TopupsService {
         {
           status: TopupStatus.APPROVED,
           wompiTransactionId,
-          wompiResponse: event.data as unknown as Record<string, any>,
+          wompiResponse,
         },
       );
 
@@ -246,5 +275,7 @@ export class TopupsService {
         amount,
       });
     }
+
+    return credited;
   }
 }
