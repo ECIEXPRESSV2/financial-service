@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -102,6 +103,47 @@ export class TopupsService {
       where: { walletId: wallet.id },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Estado en vivo de una recarga consultando a Wompi. Devuelve la URL o el QR
+   * donde el usuario completa/aprueba el pago (en sandbox), sin exponer la llave
+   * privada al frontend. NO acredita saldo (eso solo ocurre desde el webhook).
+   */
+  async getTopupDetails(userId: string, topupId: string) {
+    const wallet = await this.walletsService.findWalletByUserId(userId);
+    const topup = await this.topupRepository.findOne({
+      where: { id: topupId, walletId: wallet.id },
+    });
+    if (!topup) {
+      throw new NotFoundException('Recarga no encontrada.');
+    }
+
+    let wompi: Record<string, any> | null = null;
+    if (topup.wompiTransactionId) {
+      wompi = await this.wompiService
+        .getTransaction(topup.wompiTransactionId)
+        .catch(() => null);
+    }
+
+    const extra = (wompi?.payment_method as Record<string, any> | undefined)
+      ?.extra as Record<string, any> | undefined;
+
+    return {
+      topupId: topup.id,
+      amount: topup.amount,
+      paymentMethod: topup.paymentMethod,
+      // Estado local (lo único que mueve el saldo, vía webhook).
+      status: topup.status,
+      // Estado en vivo reportado por Wompi (puede adelantarse al webhook).
+      wompiStatus: (wompi?.status as string | undefined) ?? null,
+      // URL para aprobar/completar el pago (NEQUI, DAVIPLATA, PSE, BANCOLOMBIA_TRANSFER).
+      redirectUrl: (extra?.async_payment_url ?? extra?.url ?? null) as
+        | string
+        | null,
+      // QR en base64 (BANCOLOMBIA_QR).
+      qrImage: (extra?.qr_image ?? null) as string | null,
+    };
   }
 
   /**
