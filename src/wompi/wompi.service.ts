@@ -141,6 +141,22 @@ export class WompiService {
     return response.data.data.status;
   }
 
+  /**
+   * GET /transactions/:id → transacción completa (incluye payment_method.extra con
+   * async_payment_url / qr_image / ticket_id según el método). Se usa para que el
+   * frontend obtenga la URL o el QR donde el usuario aprueba el pago en sandbox,
+   * sin exponer la llave privada.
+   */
+  async getTransaction(
+    transactionId: string,
+  ): Promise<Record<string, any>> {
+    const response = await axios.get<{ data: Record<string, any> }>(
+      `${this.baseUrl}/transactions/${transactionId}`,
+      { headers: { Authorization: `Bearer ${this.privateKey}` } },
+    );
+    return response.data.data;
+  }
+
   /** GET /pse/financial_institutions → lista de bancos disponibles para PSE. */
   async getFinancialInstitutions(): Promise<Record<string, unknown>[]> {
     const response = await axios.get<{ data: Record<string, unknown>[] }>(

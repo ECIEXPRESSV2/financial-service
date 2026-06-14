@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import {
   ApiHeader,
   ApiOperation,
@@ -58,5 +58,20 @@ export class TopupsController {
   })
   async getPseInstitutions(): Promise<Record<string, unknown>[]> {
     return this.wompiService.getFinancialInstitutions();
+  }
+
+  // Debe ir DESPUÉS de las rutas estáticas (p. ej. pse-institutions) para no capturarlas.
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Estado en vivo de una recarga (consulta a Wompi).',
+    description:
+      'Devuelve el estado actual de la transacción en Wompi y la URL/QR donde el ' +
+      'usuario completa o aprueba el pago (sandbox). No acredita saldo.',
+  })
+  async getTopupDetails(
+    @CurrentUser() userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.topupsService.getTopupDetails(userId, id);
   }
 }
