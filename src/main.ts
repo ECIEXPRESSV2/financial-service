@@ -89,6 +89,15 @@ process.on('SIGINT', () => {
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // CORS: el frontend (ECIExpress) llama a este servicio directamente en desarrollo
+  // (sin API Gateway) enviando el header x-user-id. En producción restringir el origen.
+  app.enableCors({
+    origin: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id'],
+    credentials: true,
+  });
+
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const config = new DocumentBuilder()
