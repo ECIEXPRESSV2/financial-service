@@ -17,6 +17,7 @@ import {
   OrderCancelledPayload,
 } from '../events/payloads/order.payloads';
 import { DeliveryConfirmedPayload } from '../events/payloads/fulfillment.payloads';
+import { FinancialLogger } from '../common/logger/financial.logger';
 
 // Código de error de PostgreSQL para violación de unicidad (idempotencia por order_id).
 const PG_UNIQUE_VIOLATION = '23505';
@@ -33,6 +34,7 @@ export class TransactionsService {
     private readonly payoutService: PayoutService,
     private readonly eventPublisher: EventPublisherService,
     private readonly dataSource: DataSource,
+    private readonly financialLogger: FinancialLogger,
   ) {}
 
   // --- Lecturas para los controladores ---
@@ -206,9 +208,17 @@ export class TransactionsService {
       totalCharged: breakdown.totalCharged,
       isPeakHour: breakdown.isPeakHour,
     });
-    this.logger.log(
-      `Orden ${payload.orderId} cobrada (HELD): ${breakdown.totalCharged} centavos.`,
-    );
+    this.financialLogger.logEvent('order.payment.processed', 'Pago de orden procesado', {
+      orderId: payload.orderId,
+      buyerId: payload.buyerId,
+      storeId: payload.storeId,
+      orderAmount: breakdown.orderAmount,
+      totalCharged: breakdown.totalCharged,
+      platformFeeAmount: breakdown.platformFeeAmount,
+      peakFeeAmount: breakdown.peakFeeAmount,
+      isPeakHour: breakdown.isPeakHour,
+      walletId: wallet.id,
+    });
   }
 
   /**
@@ -251,7 +261,12 @@ export class TransactionsService {
       storeId: payload.storeId,
       reason,
     });
-    this.logger.warn(`Orden ${payload.orderId} FALLIDA: ${reason}.`);
+    this.financialLogger.warnEvent('order.payment.failed', 'Pago de orden fallido', {
+      orderId: payload.orderId,
+      storeId: payload.storeId,
+      buyerId: payload.buyerId,
+      reason,
+    });
   }
 
   // --- Handler de liberación: fulfillment.delivery.confirmed ---
@@ -293,7 +308,12 @@ export class TransactionsService {
       storePayoutAmount: tx.storePayoutAmount,
       platformFeeAmount: tx.platformFeeAmount,
     });
-    this.logger.log(`Orden ${payload.orderId} liberada (RELEASED).`);
+    this.financialLogger.logEvent('order.payment.released', 'Pago liberado al negocio', {
+      orderId: payload.orderId,
+      storeId: tx.storeId,
+      storePayoutAmount: tx.storePayoutAmount,
+      platformFeeAmount: tx.platformFeeAmount,
+    });
   }
 
   // --- Handler de reembolso: order.order.cancelled ---
@@ -348,8 +368,10 @@ export class TransactionsService {
       walletId: tx.walletId,
       refundedAmount: tx.totalCharged,
     });
-    this.logger.log(
-      `Orden ${payload.orderId} reembolsada (REFUNDED): ${tx.totalCharged} centavos.`,
-    );
+    this.financialLogger.logEvent('order.payment.refunded', 'Pago reembolsado al comprador', {
+      orderId: payload.orderId,
+      walletId: tx.walletId,
+      refundedAmount: tx.totalCharged,
+    });
   }
 }

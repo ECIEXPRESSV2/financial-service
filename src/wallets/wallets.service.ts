@@ -7,6 +7,7 @@ import {
   UserRegisteredPayload,
   UserDeletedPayload,
 } from '../events/payloads/identity.payloads';
+import { FinancialLogger } from '../common/logger/financial.logger';
 
 @Injectable()
 export class WalletsService {
@@ -18,6 +19,7 @@ export class WalletsService {
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
     private readonly dataSource: DataSource,
+    private readonly financialLogger: FinancialLogger,
   ) {}
 
   // --- Lectura para el controlador (header x-user-id) ---
@@ -126,9 +128,10 @@ export class WalletsService {
       });
     });
 
-    this.logger.log(
-      `Billetera creada para el usuario ${payload.userId} (email: ${payload.email}).`,
-    );
+    this.financialLogger.logEvent('wallet.created', 'Billetera creada', {
+      userId: payload.userId,
+      email: payload.email,
+    });
   }
 
   /**

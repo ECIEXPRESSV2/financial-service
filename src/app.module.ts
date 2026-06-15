@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
@@ -6,6 +6,8 @@ import { wompiConfig } from './config/wompi.config';
 import { rabbitmqConfig } from './config/rabbitmq.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { LoggerModule } from './common/logger/logger.module';
+import { LoggingMiddleware } from './common/logger/logging.middleware';
 import { MessagingModule } from './events/messaging.module';
 import { EventsModule } from './events/events.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -17,6 +19,7 @@ import { WompiModule } from './wompi/wompi.module';
 
 @Module({
   imports: [
+    LoggerModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [databaseConfig, wompiConfig, rabbitmqConfig],
@@ -40,4 +43,8 @@ import { WompiModule } from './wompi/wompi.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(LoggingMiddleware).forRoutes('*');
+  }
+}

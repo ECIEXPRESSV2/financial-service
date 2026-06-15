@@ -13,6 +13,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { WompiService, WompiWebhookEvent } from '../wompi/wompi.service';
 import { EventPublisherService } from '../events/event-publisher.service';
 import { PublishedEvents } from '../events/event-patterns';
+import { FinancialLogger } from '../common/logger/financial.logger';
 
 @Injectable()
 export class TopupsService {
@@ -25,6 +26,7 @@ export class TopupsService {
     private readonly wompiService: WompiService,
     private readonly eventPublisher: EventPublisherService,
     private readonly dataSource: DataSource,
+    private readonly financialLogger: FinancialLogger,
   ) {}
 
   /**
@@ -82,6 +84,14 @@ export class TopupsService {
       { id: topup.id },
       { wompiTransactionId, wompiResponse: wompiData as Record<string, any> },
     );
+
+    this.financialLogger.logEvent('wallet.topup.created', 'Recarga iniciada', {
+      topupId: topup.id,
+      userId,
+      amount: dto.amount,
+      paymentMethod: dto.paymentMethod,
+      wompiTransactionId,
+    });
 
     const extra = (wompiData?.payment_method as Record<string, unknown>)
       ?.extra as Record<string, unknown> | undefined;
@@ -202,7 +212,13 @@ export class TopupsService {
           wompiResponse: event.data as unknown as Record<string, any>,
         },
       );
-      this.logger.log(`Topup ${topup.id} marcado FAILED (${tx.status}).`);
+      this.financialLogger.warnEvent('wallet.topup.failed', 'Recarga fallida vía webhook', {
+        topupId: topup.id,
+        wompiStatus: tx.status,
+        wompiTransactionId: tx.id,
+        paymentMethod: topup.paymentMethod,
+        amount: topup.amount,
+      });
     } else {
       this.logger.debug(
         `Topup ${topup.id}: estado ${tx.status} no terminal; ignorado.`,
@@ -265,9 +281,13 @@ export class TopupsService {
         manager,
       );
       credited = true;
-      this.logger.log(
-        `Saldo acreditado: ${topup.amount} centavos al wallet ${topup.walletId}.`,
-      );
+      this.financialLogger.logEvent('wallet.topup.approved', 'Recarga aprobada y saldo acreditado', {
+        topupId,
+        walletId: topup.walletId,
+        amount: topup.amount,
+        paymentMethod: topup.paymentMethod,
+        wompiTransactionId,
+      });
     });
 
     if (credited) {
