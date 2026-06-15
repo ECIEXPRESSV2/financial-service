@@ -57,6 +57,7 @@ describe('TopupsService.handleWebhookEvent (idempotencia)', () => {
       {} as any, // wompiService (no se usa en este flujo)
       eventPublisher as any,
       dataSource as any,
+      { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
     );
     return { service, walletsService, eventPublisher };
   }
