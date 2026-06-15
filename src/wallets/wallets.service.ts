@@ -38,6 +38,11 @@ export class WalletsService {
     return this.walletRepository.findOne({ where: { userId } });
   }
 
+  /** Devuelve la proyección del usuario o null si no existe. */
+  async findUserById(userId: string): Promise<WalletUser | null> {
+    return this.walletUserRepository.findOne({ where: { id: userId } });
+  }
+
   // --- Operaciones atómicas sobre el saldo ---
 
   /**
@@ -121,7 +126,9 @@ export class WalletsService {
       });
     });
 
-    this.logger.log(`Billetera creada para el usuario ${payload.userId}.`);
+    this.logger.log(
+      `Billetera creada para el usuario ${payload.userId} (email: ${payload.email}).`,
+    );
   }
 
   /**
