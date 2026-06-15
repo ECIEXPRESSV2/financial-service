@@ -50,6 +50,7 @@ describe('TransactionsService.handleOrderCreated', () => {
       payoutService as any,
       eventPublisher as any,
       dataSource as any,
+      { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
     );
     return { service, txRepository, walletsService, eventPublisher, manager };
   }
