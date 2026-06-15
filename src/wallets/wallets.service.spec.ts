@@ -27,6 +27,7 @@ describe('WalletsService.debitWallet', () => {
       {} as any, // walletUserRepository (no se usa aquí)
       walletRepository,
       {} as any, // dataSource (no se usa aquí)
+      { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
     );
     return { service, execute };
   }
