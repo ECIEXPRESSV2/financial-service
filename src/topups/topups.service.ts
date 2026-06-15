@@ -34,15 +34,17 @@ export class TopupsService {
    * saldo (eso solo ocurre desde el webhook validado). Devuelve los datos que el front
    * necesita para completar el pago.
    */
-  async createTopup(
-    userId: string,
-    dto: CreateTopupDto,
-    customerEmail?: string,
-  ) {
+  async createTopup(userId: string, dto: CreateTopupDto) {
     const wallet = await this.walletsService.findWalletByUserId(userId);
     if (!wallet.isActive) {
       throw new ForbiddenException('La billetera está inactiva.');
     }
+
+    const walletUser = await this.walletsService.findUserById(userId);
+    const customerEmail = walletUser?.email ?? `${userId}@eciexpress.local`;
+    this.logger.log(
+      `Topup para usuario ${userId}: usando email "${customerEmail}".`,
+    );
 
     // 1. Crear el topup en estado PENDING (su id se usa como referencia única en Wompi).
     const topup = await this.topupRepository.save(
@@ -60,7 +62,7 @@ export class TopupsService {
       wompiData = await this.wompiService.createTopupTransaction({
         topupId: topup.id,
         amountInCents: dto.amount,
-        customerEmail: customerEmail ?? `${userId}@eciexpress.local`,
+        customerEmail,
         paymentMethod: dto.paymentMethod,
         paymentData: dto.paymentData as Record<string, unknown>,
       });
