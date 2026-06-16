@@ -25,3 +25,6 @@ pnpm-debug.log*
 Thumbs.db
 pnpm-workspace.yaml
 pnpm-workspace.yaml
+
+# Instrucciones internas para Claude Code (no versionar)
+claude-code-financial-service.md

@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { TopupStatus, WalletTopup } from './entities/wallet-topup.entity';
+import { Wallet } from '../wallets/entities/wallet.entity';
 import { CreateTopupDto } from './dto/create-topup.dto';
 import { WalletsService } from '../wallets/wallets.service';
 import { WompiService, WompiWebhookEvent } from '../wompi/wompi.service';
@@ -251,6 +252,7 @@ export class TopupsService {
   ): Promise<boolean> {
     let credited = false;
     let amount = 0;
+    let userId = '';
 
     await this.dataSource.transaction(async (manager) => {
       const updateResult = await manager.update(
@@ -275,6 +277,12 @@ export class TopupsService {
         where: { id: topupId },
       });
       amount = topup.amount;
+      // Resolvemos el dueño de la billetera para que notifications-service pueda
+      // notificar al comprador (el evento debe llevar el userId, no solo el walletId).
+      const wallet = await manager.findOneOrFail(Wallet, {
+        where: { id: topup.walletId },
+      });
+      userId = wallet.userId;
       await this.walletsService.creditWallet(
         topup.walletId,
         topup.amount,
@@ -293,6 +301,7 @@ export class TopupsService {
     if (credited) {
       await this.eventPublisher.publish(PublishedEvents.WALLET_TOPUP_APPROVED, {
         topupId,
+        userId,
         wompiTransactionId,
         amount,
       });
