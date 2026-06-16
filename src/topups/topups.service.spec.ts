@@ -45,7 +45,12 @@ describe('TopupsService.handleWebhookEvent (idempotencia)', () => {
       .mockResolvedValueOnce({ affected: 0 });
     const manager = {
       update: managerUpdate,
-      findOneOrFail: jest.fn().mockResolvedValue(topup),
+      // En el flujo de acreditación se consulta primero el topup y luego su billetera
+      // (para resolver el userId que viaja en el evento).
+      findOneOrFail: jest
+        .fn()
+        .mockResolvedValueOnce(topup)
+        .mockResolvedValueOnce({ id: 'wallet-1', userId: 'user-1' }),
     };
     const dataSource = {
       transaction: jest.fn((cb: any) => cb(manager)),
@@ -78,7 +83,11 @@ describe('TopupsService.handleWebhookEvent (idempotencia)', () => {
     expect(eventPublisher.publish).toHaveBeenCalledTimes(1);
     expect(eventPublisher.publish).toHaveBeenCalledWith(
       PublishedEvents.WALLET_TOPUP_APPROVED,
-      expect.objectContaining({ topupId: 'topup-1', amount: 50000 }),
+      expect.objectContaining({
+        topupId: 'topup-1',
+        userId: 'user-1',
+        amount: 50000,
+      }),
     );
   });
 
