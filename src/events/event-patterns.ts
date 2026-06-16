@@ -25,6 +25,7 @@ export const PublishedEvents = {
   PAYMENT_RELEASED: 'financial.payment.released',
   REFUND_ISSUED: 'financial.refund.issued',
   WALLET_TOPUP_APPROVED: 'financial.wallet.topup.approved',
+  WALLET_TOPUP_FAILED: 'financial.wallet.topup.failed',
 } as const;
 
 // Patrones de binding de la cola propia al exchange compartido.

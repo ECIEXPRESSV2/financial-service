@@ -40,6 +40,14 @@ export class WalletsService {
     return this.walletRepository.findOne({ where: { userId } });
   }
 
+  /**
+   * Resuelve la billetera por su id. Útil para obtener el `userId` (dueño) a partir del
+   * `walletId` cuando se va a publicar un evento que debe llevar el destinatario.
+   */
+  async findWalletById(walletId: string): Promise<Wallet | null> {
+    return this.walletRepository.findOne({ where: { id: walletId } });
+  }
+
   /** Devuelve la proyección del usuario o null si no existe. */
   async findUserById(userId: string): Promise<WalletUser | null> {
     return this.walletUserRepository.findOne({ where: { id: userId } });
