@@ -201,6 +201,7 @@ export class TransactionsService {
     // 6. Publicar el cobro exitoso.
     await this.eventPublisher.publish(PublishedEvents.PAYMENT_PROCESSED, {
       orderId: payload.orderId,
+      userId: payload.buyerId, // destinatario para notifications-service
       walletId: wallet.id,
       storeId: store.id,
       orderAmount: breakdown.orderAmount,
@@ -258,6 +259,7 @@ export class TransactionsService {
 
     await this.eventPublisher.publish(PublishedEvents.PAYMENT_FAILED, {
       orderId: payload.orderId,
+      userId: payload.buyerId, // destinatario para notifications-service
       storeId: payload.storeId,
       reason,
     });
@@ -363,8 +365,11 @@ export class TransactionsService {
       return;
     }
 
+    // Resolvemos el dueño de la billetera para que el evento lleve el destinatario.
+    const refundWallet = await this.walletsService.findWalletById(tx.walletId);
     await this.eventPublisher.publish(PublishedEvents.REFUND_ISSUED, {
       orderId: payload.orderId,
+      userId: refundWallet?.userId,
       walletId: tx.walletId,
       refundedAmount: tx.totalCharged,
     });

@@ -205,7 +205,7 @@ export class TopupsService {
       tx.status === 'VOIDED'
     ) {
       // Solo marca FAILED si seguía PENDING (no pisa una recarga ya aprobada).
-      await this.topupRepository.update(
+      const failResult = await this.topupRepository.update(
         { id: topup.id, status: TopupStatus.PENDING },
         {
           status: TopupStatus.FAILED,
@@ -220,6 +220,19 @@ export class TopupsService {
         paymentMethod: topup.paymentMethod,
         amount: topup.amount,
       });
+
+      // Publicar solo si esta llamada hizo la transición PENDING → FAILED (idempotencia
+      // ante webhooks repetidos). Se resuelve el dueño para que el evento lleve el userId.
+      if (failResult.affected === 1) {
+        const wallet = await this.walletsService.findWalletById(topup.walletId);
+        await this.eventPublisher.publish(PublishedEvents.WALLET_TOPUP_FAILED, {
+          topupId: topup.id,
+          userId: wallet?.userId,
+          amount: topup.amount,
+          paymentMethod: topup.paymentMethod,
+          reason: tx.status,
+        });
+      }
     } else {
       this.logger.debug(
         `Topup ${topup.id}: estado ${tx.status} no terminal; ignorado.`,
