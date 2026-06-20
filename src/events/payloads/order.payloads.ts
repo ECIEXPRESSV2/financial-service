@@ -13,3 +13,16 @@ export interface OrderCreatedPayload {
 export interface OrderCancelledPayload {
   orderId: string;
 }
+
+/**
+ * Payload de `order.return.confirmed`: orders-service autoriza el reembolso de una
+ * devolución (total o parcial) con el monto que products-service ya cotizó.
+ * `refundAmount` va en centavos COP.
+ */
+export interface ReturnConfirmedPayload {
+  orderId: string;
+  buyerId: string;
+  storeId: string;
+  full: boolean;
+  refundAmount: number;
+}

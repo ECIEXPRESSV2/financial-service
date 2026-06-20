@@ -15,6 +15,8 @@ export const ConsumedEvents = {
   STORE_DELETED: 'identity.store.deleted',
   ORDER_CREATED: 'order.order.created',
   ORDER_CANCELLED: 'order.order.cancelled',
+  // orders autoriza el reembolso (total/parcial) tras la cotización de products.
+  RETURN_CONFIRMED: 'order.return.confirmed',
   DELIVERY_CONFIRMED: 'fulfillment.delivery.confirmed',
 } as const;
 
