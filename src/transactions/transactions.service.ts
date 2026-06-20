@@ -15,6 +15,7 @@ import { PublishedEvents } from '../events/event-patterns';
 import {
   OrderCreatedPayload,
   OrderCancelledPayload,
+  ReturnConfirmedPayload,
 } from '../events/payloads/order.payloads';
 import { DeliveryConfirmedPayload } from '../events/payloads/fulfillment.payloads';
 import { FinancialLogger } from '../common/logger/financial.logger';
@@ -315,6 +316,89 @@ export class TransactionsService {
       storeId: tx.storeId,
       storePayoutAmount: tx.storePayoutAmount,
       platformFeeAmount: tx.platformFeeAmount,
+    });
+  }
+
+  // --- Handler de reembolso parcial/total: order.return.confirmed ---
+
+  /**
+   * Reembolsa a la billetera del comprador el monto de una devolución cotizada por
+   * products y autorizada por orders. Soporta devoluciones parciales acumulativas:
+   * nunca reembolsa más que `total_charged`. Atómico y a prueba de concurrencia.
+   */
+  async handleReturnConfirmed(payload: ReturnConfirmedPayload): Promise<void> {
+    const tx = await this.findByOrderId(payload.orderId);
+    if (!tx) {
+      this.logger.warn(
+        `return.confirmed sin transacción para orden ${payload.orderId}; ignorado.`,
+      );
+      return;
+    }
+    if (
+      tx.status === OrderTransactionStatus.FAILED ||
+      tx.status === OrderTransactionStatus.REFUNDED
+    ) {
+      this.logger.warn(
+        `Orden ${payload.orderId} en estado ${tx.status}; no admite más reembolsos.`,
+      );
+      return;
+    }
+
+    const remaining = tx.totalCharged - tx.refundedAmount;
+    if (remaining <= 0) {
+      this.logger.warn(`Orden ${payload.orderId} ya reembolsada por completo; ignorado.`);
+      return;
+    }
+    // El monto reembolsado nunca excede lo cobrado.
+    const amount = Math.min(Math.max(payload.refundAmount, 0), remaining);
+    if (amount <= 0) {
+      this.logger.warn(`Monto de devolución no válido para ${payload.orderId}; ignorado.`);
+      return;
+    }
+
+    const newRefunded = tx.refundedAmount + amount;
+    const fullyRefunded = payload.full || newRefunded >= tx.totalCharged;
+
+    // Crédito al wallet + actualización de la transacción en una sola transacción atómica.
+    // El WHERE sobre refunded_amount evita condiciones de carrera ante eventos concurrentes.
+    const applied = await this.dataSource.transaction(async (manager) => {
+      const result = await manager.update(
+        OrderTransaction,
+        { orderId: payload.orderId, refundedAmount: tx.refundedAmount },
+        {
+          refundedAmount: newRefunded,
+          status: fullyRefunded
+            ? OrderTransactionStatus.REFUNDED
+            : OrderTransactionStatus.PARTIALLY_REFUNDED,
+          refundedAt: new Date(),
+        },
+      );
+      if (result.affected !== 1) {
+        return false; // otro evento concurrente ya actualizó el acumulado.
+      }
+      await this.walletsService.creditWallet(tx.walletId, amount, manager);
+      return true;
+    });
+
+    if (!applied) {
+      this.logger.warn(`Devolución de ${payload.orderId} ya aplicada concurrentemente; ignorado.`);
+      return;
+    }
+
+    await this.eventPublisher.publish(PublishedEvents.REFUND_ISSUED, {
+      orderId: payload.orderId,
+      userId: payload.buyerId,
+      walletId: tx.walletId,
+      refundedAmount: amount,
+      totalRefunded: newRefunded,
+      full: fullyRefunded,
+    });
+    this.financialLogger.logEvent('order.payment.refunded', 'Devolución reembolsada al comprador', {
+      orderId: payload.orderId,
+      walletId: tx.walletId,
+      refundedAmount: amount,
+      totalRefunded: newRefunded,
+      full: fullyRefunded,
     });
   }
 
