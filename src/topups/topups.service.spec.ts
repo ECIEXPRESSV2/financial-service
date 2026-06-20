@@ -35,7 +35,11 @@ describe('TopupsService.handleWebhookEvent (idempotencia)', () => {
       findOne: jest.fn().mockResolvedValue(topup),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
-    const walletsService = { creditWallet: jest.fn().mockResolvedValue(true) };
+    const walletsService = {
+      creditWallet: jest.fn().mockResolvedValue(true),
+      // En la ruta DECLINED se resuelve el dueño de la billetera para el evento.
+      findWalletById: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'user-1' }),
+    };
     const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
 
     // El primer UPDATE condicional (PENDING -> APPROVED) afecta 1 fila; el segundo 0.
