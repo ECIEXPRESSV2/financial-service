@@ -13,6 +13,7 @@ export enum OrderTransactionStatus {
   HELD = 'HELD',
   RELEASED = 'RELEASED',
   REFUNDED = 'REFUNDED',
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
   FAILED = 'FAILED',
 }
 
@@ -99,6 +100,15 @@ export class OrderTransaction {
     default: OrderTransactionStatus.PENDING,
   })
   status: OrderTransactionStatus;
+
+  // Monto acumulado ya reembolsado al comprador (devoluciones totales/parciales).
+  @Column({
+    name: 'refunded_amount',
+    type: 'bigint',
+    default: 0,
+    transformer: bigIntTransformer,
+  })
+  refundedAmount: number;
 
   @Column({ name: 'is_peak_hour', default: false })
   isPeakHour: boolean;

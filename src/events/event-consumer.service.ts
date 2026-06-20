@@ -15,6 +15,7 @@ import {
 import {
   OrderCreatedPayload,
   OrderCancelledPayload,
+  ReturnConfirmedPayload,
 } from './payloads/order.payloads';
 import { DeliveryConfirmedPayload } from './payloads/fulfillment.payloads';
 
@@ -83,6 +84,11 @@ export class EventConsumerService {
         case ConsumedEvents.ORDER_CANCELLED:
           await this.transactionsService.handleOrderCancelled(
             payload as OrderCancelledPayload,
+          );
+          break;
+        case ConsumedEvents.RETURN_CONFIRMED:
+          await this.transactionsService.handleReturnConfirmed(
+            payload as ReturnConfirmedPayload,
           );
           break;
         case ConsumedEvents.DELIVERY_CONFIRMED:
