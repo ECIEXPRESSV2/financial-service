@@ -171,6 +171,7 @@ export class TransactionsService {
           platformFeeAmount: breakdown.platformFeeAmount,
           storePayoutAmount: breakdown.storePayoutAmount,
           status: OrderTransactionStatus.HELD,
+          refundedAmount: 0,
           isPeakHour: breakdown.isPeakHour,
           heldAt: now,
         });
@@ -242,6 +243,7 @@ export class TransactionsService {
         platformFeeAmount: 0,
         storePayoutAmount: 0,
         status: OrderTransactionStatus.FAILED,
+        refundedAmount: 0,
         isPeakHour: false,
         failureReason: reason,
       });
