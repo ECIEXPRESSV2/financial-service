@@ -5,7 +5,7 @@ import { WalletUser } from './entities/wallet-user.entity';
 import { Wallet } from './entities/wallet.entity';
 import {
   UserRegisteredPayload,
-  UserDeletedPayload,
+  UserDeactivatedPayload,
 } from '../events/payloads/identity.payloads';
 import { FinancialLogger } from '../common/logger/financial.logger';
 
@@ -143,9 +143,9 @@ export class WalletsService {
   }
 
   /**
-   * `identity.user.deleted`: desactiva el comprador y su billetera. Idempotente.
+   * `identity.user.deactivated`: desactiva el comprador y su billetera. Idempotente.
    */
-  async handleUserDeleted(payload: UserDeletedPayload): Promise<void> {
+  async handleUserDeleted(payload: UserDeactivatedPayload): Promise<void> {
     await this.walletUserRepository.update(
       { id: payload.userId },
       { isActive: false },

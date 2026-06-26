@@ -8,9 +8,9 @@ import { StoresService } from '../stores/stores.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import {
   UserRegisteredPayload,
-  UserDeletedPayload,
+  UserDeactivatedPayload,
   StoreUpsertedPayload,
-  StoreDeletedPayload,
+  StoreStatusChangedPayload,
 } from './payloads/identity.payloads';
 import {
   OrderCreatedPayload,
@@ -56,9 +56,9 @@ export class EventConsumerService {
             payload as UserRegisteredPayload,
           );
           break;
-        case ConsumedEvents.USER_DELETED:
+        case ConsumedEvents.USER_DEACTIVATED:
           await this.walletsService.handleUserDeleted(
-            payload as UserDeletedPayload,
+            payload as UserDeactivatedPayload,
           );
           break;
         case ConsumedEvents.STORE_CREATED:
@@ -71,9 +71,9 @@ export class EventConsumerService {
             payload as StoreUpsertedPayload,
           );
           break;
-        case ConsumedEvents.STORE_DELETED:
-          await this.storesService.handleStoreDeleted(
-            payload as StoreDeletedPayload,
+        case ConsumedEvents.STORE_STATUS_CHANGED:
+          await this.storesService.handleStoreStatusChanged(
+            payload as StoreStatusChangedPayload,
           );
           break;
         case ConsumedEvents.ORDER_CREATED:
