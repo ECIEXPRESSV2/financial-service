@@ -9,10 +9,13 @@
 // Eventos que este servicio CONSUME.
 export const ConsumedEvents = {
   USER_REGISTERED: 'identity.user.registered',
-  USER_DELETED: 'identity.user.deleted',
+  // Identity no emite `*.deleted`; reaccionamos a la desactivación del usuario.
+  USER_DEACTIVATED: 'identity.user.deactivated',
   STORE_CREATED: 'identity.store.created',
   STORE_UPDATED: 'identity.store.updated',
-  STORE_DELETED: 'identity.store.deleted',
+  // Identity no emite `store.deleted`; reaccionamos al cambio de estado de la tienda
+  // (el handler puede inspeccionar el status dentro del payload si necesita distinguir cierres).
+  STORE_STATUS_CHANGED: 'identity.store.status_changed',
   ORDER_CREATED: 'order.order.created',
   ORDER_CANCELLED: 'order.order.cancelled',
   // orders autoriza el reembolso (total/parcial) tras la cotización de products.

@@ -7,7 +7,7 @@ import { UpdateCommissionConfigDto } from './dto/update-commission-config.dto';
 import { UpdatePayoutAccountDto } from './dto/update-payout-account.dto';
 import {
   StoreUpsertedPayload,
-  StoreDeletedPayload,
+  StoreStatusChangedPayload,
 } from '../events/payloads/identity.payloads';
 
 @Injectable()
@@ -102,7 +102,7 @@ export class StoresService {
 
     await this.storeRepository.insert({
       id: payload.storeId,
-      name: payload.name,
+      status: 'OPEN',
       isActive: true,
       platformFeePercent: defaultPlatformFee,
       peakFeePercent: defaultPeakFee,
@@ -114,35 +114,52 @@ export class StoresService {
   }
 
   /**
-   * `identity.store.updated`: actualiza nombre y datos generales. No toca la
-   * configuración financiera (esa la administra un admin de ECIExpress).
+   * `identity.store.updated`: financial no espeja el nombre del negocio ni otros datos
+   * generales (las comisiones las administra un admin de ECIExpress). Solo se asegura de
+   * que la proyección exista, por si el evento llega antes que `store.created`.
    */
   async handleStoreUpdated(payload: StoreUpsertedPayload): Promise<void> {
-    const result = await this.storeRepository.update(
-      { id: payload.storeId },
-      { name: payload.name },
-    );
-    if (result.affected === 0) {
-      // Si aún no existía (evento fuera de orden), lo creamos para no perder el dato.
+    const exists = await this.storeRepository.findOne({
+      where: { id: payload.storeId },
+    });
+    if (!exists) {
+      // Evento fuera de orden: creamos la proyección para no perderla.
       await this.handleStoreCreated(payload);
       return;
     }
-    this.logger.log(`Negocio ${payload.storeId} actualizado.`);
+    this.logger.log(
+      `Negocio ${payload.storeId}: evento updated recibido (sin cambios financieros).`,
+    );
   }
 
   /**
-   * `identity.store.deleted`: desactiva el negocio y congela desembolsos pendientes.
-   * Idempotente.
+   * `identity.store.status_changed`: guarda el nuevo estado en la proyección y, según él,
+   * activa o congela los desembolsos. Si el negocio vuelve a `OPEN` se reactiva y NO se
+   * congelan transacciones; cualquier otro estado (CLOSED, TEMPORARILY_CLOSED, ...) lo
+   * desactiva y congela los desembolsos pendientes. Idempotente.
    */
-  async handleStoreDeleted(payload: StoreDeletedPayload): Promise<void> {
+  async handleStoreStatusChanged(
+    payload: StoreStatusChangedPayload,
+  ): Promise<void> {
+    const isOpen = payload.newStatus === 'OPEN';
+
     await this.storeRepository.update(
       { id: payload.storeId },
-      { isActive: false },
+      { status: payload.newStatus, isActive: isOpen },
     );
-    // Congelar desembolsos pendientes: las transacciones HELD de este negocio no se
-    // liberarán mientras esté inactivo (la liberación valida el estado del store).
-    this.logger.warn(
-      `Negocio ${payload.storeId} desactivado; desembolsos pendientes congelados.`,
-    );
+
+    if (isOpen) {
+      this.logger.log(
+        `Negocio ${payload.storeId} reactivado (status=${payload.newStatus}); ` +
+          `desembolsos habilitados.`,
+      );
+    } else {
+      // Las transacciones HELD de este negocio no se liberarán mientras esté inactivo
+      // (la liberación valida el estado del store).
+      this.logger.warn(
+        `Negocio ${payload.storeId} inactivo (status=${payload.newStatus}); ` +
+          `desembolsos pendientes congelados.`,
+      );
+    }
   }
 }

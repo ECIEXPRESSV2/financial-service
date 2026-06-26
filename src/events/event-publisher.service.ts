@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { EXCHANGE_NAME } from '../config/rabbitmq.config';
 
 /**
  * Publica los eventos de dominio de este servicio sobre el exchange topic compartido
- * `eciexpress_events`. Cada payload incluye los ids relevantes, los montos en centavos
- * y un timestamp ISO.
+ * `eciexpress_events`. Los campos de negocio (ids, montos en centavos, ...) van planos
+ * en el primer nivel; este publisher añade la metadata estándar del bus.
  */
 @Injectable()
 export class EventPublisherService {
@@ -14,8 +15,10 @@ export class EventPublisherService {
   constructor(private readonly amqp: AmqpConnection) {}
 
   /**
-   * Emite un evento al exchange compartido con la routing key indicada. Se añade
-   * automáticamente `timestamp` (ISO) si el payload no lo trae.
+   * Emite un evento al exchange compartido con la routing key indicada. Envuelve el
+   * payload de negocio en el sobre estándar uniforme: `occurredAt`, `source`,
+   * `idempotencyKey`, `eventVersion` y `correlationId`. El tipo de evento lo identifica
+   * la routing key, no se duplica en el cuerpo.
    */
   async publish<T extends Record<string, unknown>>(
     routingKey: string,
@@ -23,7 +26,13 @@ export class EventPublisherService {
   ): Promise<void> {
     const message = {
       ...payload,
-      timestamp: payload.timestamp ?? new Date().toISOString(),
+      occurredAt:
+        (payload.occurredAt as string | undefined) ?? new Date().toISOString(),
+      source: 'financial-service',
+      idempotencyKey:
+        (payload.idempotencyKey as string | undefined) ?? randomUUID(),
+      eventVersion: (payload.eventVersion as number | undefined) ?? 1,
+      correlationId: (payload.correlationId as string | undefined) ?? null,
     };
 
     try {
