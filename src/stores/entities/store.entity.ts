@@ -26,8 +26,13 @@ export class Store {
   @PrimaryColumn('uuid')
   id: string;
 
-  @Column()
-  name: string;
+  /**
+   * Estado del negocio replicado desde `identity.store.status_changed`
+   * (OPEN, TEMPORARILY_CLOSED, CLOSED, ...). Cuando vuelve a OPEN no se congelan
+   * los desembolsos; cualquier otro estado los congela.
+   */
+  @Column({ default: 'OPEN' })
+  status: string;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
