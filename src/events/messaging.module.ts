@@ -1,40 +1,51 @@
-import { Global, Module } from '@nestjs/common';
+import {
+  Global,
+  Inject,
+  Module,
+  OnApplicationShutdown,
+} from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
-import { EXCHANGE_NAME } from '../config/rabbitmq.config';
+import { ServiceBusClient } from '@azure/service-bus';
+import { DefaultAzureCredential } from '@azure/identity';
 import { EventPublisherService } from './event-publisher.service';
 
 /**
- * Módulo global del bus de eventos. Configura la conexión a RabbitMQ (CloudAMQP) y
- * declara el exchange topic compartido `eciexpress_events`.
+ * Token de inyección del ServiceBusClient compartido (sender y receiver).
+ */
+export const SERVICE_BUS_CLIENT = Symbol('SERVICE_BUS_CLIENT');
+
+/**
+ * Módulo global del bus de eventos (Azure Service Bus). Crea un único `ServiceBusClient`
+ * autenticado con Managed Identity (DefaultAzureCredential) contra el FQDN del namespace,
+ * y expone `EventPublisherService`. Reemplaza al RabbitMQModule (@golevelup/amqplib).
  *
- * Se marca @Global para que tanto `AmqpConnection` (usada por los @RabbitSubscribe del
- * consumidor) como `EventPublisherService` estén disponibles en todos los módulos sin
- * tener que reimportar RabbitMQModule. La URL de conexión llega por `RABBITMQ_URL`.
+ * Es @Global para que el cliente y el publisher estén disponibles sin reimportar. La
+ * conexión se cierra al apagar la app.
  */
 @Global()
 @Module({
-  imports: [
-    RabbitMQModule.forRootAsync({
-      imports: [ConfigModule],
+  imports: [ConfigModule],
+  providers: [
+    {
+      provide: SERVICE_BUS_CLIENT,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        uri: config.getOrThrow<string>('RABBITMQ_URL'),
-        exchanges: [
-          {
-            name: EXCHANGE_NAME,
-            type: 'topic',
-            createExchangeIfNotExists: true,
-            options: { durable: true },
-          },
-        ],
-        // No bloquea el arranque si CloudAMQP no responde de inmediato; el
-        // connection-manager reintenta y reasienta las colas/bindings al reconectar.
-        connectionInitOptions: { wait: false },
-      }),
-    }),
+      useFactory: (config: ConfigService): ServiceBusClient => {
+        const fqns = config.getOrThrow<string>(
+          'serviceBus.fullyQualifiedNamespace',
+        );
+        return new ServiceBusClient(fqns, new DefaultAzureCredential());
+      },
+    },
+    EventPublisherService,
   ],
-  providers: [EventPublisherService],
-  exports: [RabbitMQModule, EventPublisherService],
+  exports: [SERVICE_BUS_CLIENT, EventPublisherService],
 })
-export class MessagingModule {}
+export class MessagingModule implements OnApplicationShutdown {
+  constructor(
+    @Inject(SERVICE_BUS_CLIENT) private readonly client: ServiceBusClient,
+  ) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.client.close();
+  }
+}

@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
 import { wompiConfig } from './config/wompi.config';
-import { rabbitmqConfig } from './config/rabbitmq.config';
+import { serviceBusConfig } from './config/service-bus.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LoggerModule } from './common/logger/logger.module';
@@ -22,7 +22,7 @@ import { WompiModule } from './wompi/wompi.module';
     LoggerModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, wompiConfig, rabbitmqConfig],
+      load: [databaseConfig, wompiConfig, serviceBusConfig],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
