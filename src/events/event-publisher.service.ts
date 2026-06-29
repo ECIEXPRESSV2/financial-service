@@ -1,18 +1,31 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
-import { EXCHANGE_NAME } from '../config/rabbitmq.config';
+import { ServiceBusClient, ServiceBusSender } from '@azure/service-bus';
+import { SERVICE_BUS_CLIENT } from './service-bus.tokens';
 
 /**
- * Publica los eventos de dominio de este servicio sobre el exchange topic compartido
- * `eciexpress_events`. Los campos de negocio (ids, montos en centavos, ...) van planos
- * en el primer nivel; este publisher añade la metadata estándar del bus.
+ * Publica los eventos de dominio de este servicio sobre el topic compartido
+ * `eciexpress_events` (Azure Service Bus). Los campos de negocio (ids, montos en
+ * centavos, ...) van planos en el primer nivel; este publisher añade la metadata
+ * estándar del bus. El tipo de evento (routing key) viaja como el `subject` del mensaje.
  */
 @Injectable()
-export class EventPublisherService {
+export class EventPublisherService implements OnModuleDestroy {
   private readonly logger = new Logger(EventPublisherService.name);
+  private readonly sender: ServiceBusSender;
 
-  constructor(private readonly amqp: AmqpConnection) {}
+  constructor(
+    @Inject(SERVICE_BUS_CLIENT) private readonly client: ServiceBusClient,
+  ) {
+    this.sender = this.client.createSender(
+      process.env.SERVICE_BUS_TOPIC ?? 'eciexpress_events',
+    );
+  }
 
   /**
    * Emite un evento al exchange compartido con la routing key indicada. Envuelve el
@@ -36,7 +49,11 @@ export class EventPublisherService {
     };
 
     try {
-      await this.amqp.publish(EXCHANGE_NAME, routingKey, message);
+      await this.sender.sendMessages({
+        body: message,
+        subject: routingKey,
+        applicationProperties: { routingKey },
+      });
       this.logger.log(`Evento publicado: ${routingKey}`);
     } catch (error) {
       // No interrumpimos el flujo de negocio si el bus falla momentáneamente; el
@@ -45,5 +62,9 @@ export class EventPublisherService {
         `Error publicando evento ${routingKey}: ${(error as Error).message}`,
       );
     }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.sender.close();
   }
 }
