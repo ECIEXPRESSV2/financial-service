@@ -1,8 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
-import type { ConsumeMessage } from 'amqplib';
-import { QUEUE_NAME, EXCHANGE_NAME } from '../config/rabbitmq.config';
-import { ConsumedEvents, BINDING_PATTERNS } from './event-patterns';
+import { ConsumedEvents } from './event-patterns';
 import { WalletsService } from '../wallets/wallets.service';
 import { StoresService } from '../stores/stores.service';
 import { TransactionsService } from '../transactions/transactions.service';
@@ -38,15 +35,15 @@ export class EventConsumerService {
     private readonly transactionsService: TransactionsService,
   ) {}
 
-  @RabbitSubscribe({
-    exchange: EXCHANGE_NAME,
-    routingKey: BINDING_PATTERNS, // ['identity.#', 'order.#', 'fulfillment.#']
-    queue: QUEUE_NAME,
-    queueOptions: { durable: true },
-    createQueueIfNotExists: true,
-  })
-  async handleEvent(payload: unknown, amqpMsg: ConsumeMessage): Promise<void> {
-    const routingKey = amqpMsg.fields.routingKey;
+  /**
+   * Procesa un evento del bus. Lo invoca el ServiceBusSubscriberService con el
+   * routing-key (Subject del mensaje) y el body ya deserializado. Captura los errores
+   * de datos internamente (idempotente) para no reencolar/poison-loop.
+   */
+  async handleEvent(
+    routingKey: string,
+    payload: Record<string, any>,
+  ): Promise<void> {
     this.logger.log(`Evento recibido: ${routingKey}`);
 
     try {
