@@ -67,7 +67,12 @@ export class TopupsService {
         paymentMethod: dto.paymentMethod,
         paymentData: dto.paymentData as Record<string, unknown>,
       });
-    } catch {
+    } catch (error) {
+      // Loguear el error real (antes se tragaba en un catch vacío y era indepurable).
+      this.logger.error(
+        `Wompi rechazó la creación del topup ${topup.id}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
       // Si Wompi rechaza la creación, el topup queda FAILED para trazabilidad.
       await this.topupRepository.update(
         { id: topup.id },

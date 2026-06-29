@@ -60,6 +60,11 @@ export class WompiService {
     return this.configService.getOrThrow<string>('wompi.eventsSecret');
   }
 
+  /** Modo sandbox de Wompi (controlado por WOMPI_SANDBOX, no por NODE_ENV). */
+  private get sandbox(): boolean {
+    return this.configService.get<boolean>('wompi.sandbox') ?? false;
+  }
+
   /** GET /merchants/:publicKey → devuelve el acceptance_token vigente. */
   async getAcceptanceToken(): Promise<string> {
     const response = await axios.get<{
@@ -267,7 +272,7 @@ export class WompiService {
             user_type: 'PERSON',
             payment_description: 'Recarga billetera ECIExpress',
             // sandbox_status simula el resultado en sandbox; no enviar en producción.
-            ...(process.env.NODE_ENV !== 'production' && { sandbox_status: 'APPROVED' }),
+            ...(this.sandbox && { sandbox_status: 'APPROVED' }),
           },
         };
 
@@ -278,7 +283,7 @@ export class WompiService {
           payment_method: {
             type: 'BANCOLOMBIA_QR',
             payment_description: 'Recarga billetera ECIExpress',
-            ...(process.env.NODE_ENV !== 'production' && { sandbox_status: 'APPROVED' }),
+            ...(this.sandbox && { sandbox_status: 'APPROVED' }),
           },
         };
 
