@@ -12,7 +12,7 @@ import {
   ServiceBusReceivedMessage,
   ProcessErrorArgs,
 } from '@azure/service-bus';
-import { SERVICE_BUS_CLIENT } from './messaging.module';
+import { SERVICE_BUS_CLIENT } from './service-bus.tokens';
 import { EventConsumerService } from './event-consumer.service';
 
 /**

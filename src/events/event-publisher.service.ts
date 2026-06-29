@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ServiceBusClient, ServiceBusSender } from '@azure/service-bus';
-import { SERVICE_BUS_CLIENT } from './messaging.module';
+import { SERVICE_BUS_CLIENT } from './service-bus.tokens';
 
 /**
  * Publica los eventos de dominio de este servicio sobre el topic compartido
