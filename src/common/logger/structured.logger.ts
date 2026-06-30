@@ -1,14 +1,30 @@
 import { LoggerService, LogLevel } from '@nestjs/common';
+import { Contracts } from 'applicationinsights';
 import { loggingStorage } from './logging.context';
+import { getTelemetryClient } from '../telemetry/app-insights';
+import { SERVICE_NAME } from '../telemetry/service-name';
 
 /**
  * Reemplaza el logger por defecto de NestJS.
- * Emite JSON estructurado a stdout/stderr para que Application Insights
- * (o cualquier colector de logs) pueda parsear y correlacionar por userId.
  *
- * Para conectar Application Insights en el futuro, reemplazar process.stdout.write
- * por appInsights.defaultClient.trackTrace({ message, severityLevel, properties }).
+ * Emite JSON estructurado a stdout/stderr (visible en `az containerapp logs`) y,
+ * si Application Insights está configurado, envía cada entrada como trackTrace
+ * con las propiedades serviceName y userId, de modo que en AI se pueda:
+ *   - filtrar por microservicio:  customDimensions.serviceName == 'financial-service'
+ *   - trazar a un usuario:        customDimensions.userId == '<uuid>'
+ *
+ * El userId se toma del contexto HTTP (AsyncLocalStorage, lo rellena
+ * LoggingMiddleware a partir del header x-user-id).
  */
+const SEVERITY: Record<string, Contracts.SeverityLevel> = {
+  verbose: Contracts.SeverityLevel.Verbose,
+  debug: Contracts.SeverityLevel.Verbose,
+  info: Contracts.SeverityLevel.Information,
+  warn: Contracts.SeverityLevel.Warning,
+  error: Contracts.SeverityLevel.Error,
+  fatal: Contracts.SeverityLevel.Critical,
+};
+
 export class StructuredLogger implements LoggerService {
   private write(
     level: string,
@@ -16,18 +32,43 @@ export class StructuredLogger implements LoggerService {
     context?: string,
     trace?: string,
   ): void {
-    const store = loggingStorage.getStore();
+    const userId = loggingStorage.getStore()?.userId;
+
     const entry: Record<string, unknown> = {
       timestamp: new Date().toISOString(),
       level,
-      service: 'financial-service',
+      service: SERVICE_NAME,
       ...(context && { context }),
-      ...(store?.userId && { userId: store.userId }),
+      ...(userId && { userId }),
       message: typeof message === 'object' ? message : String(message),
       ...(trace && { trace }),
     };
-    const out = level === 'error' ? process.stderr : process.stdout;
+    const out = level === 'error' || level === 'fatal' ? process.stderr : process.stdout;
     out.write(JSON.stringify(entry) + '\n');
+
+    this.toAppInsights(level, message, context, userId, trace);
+  }
+
+  private toAppInsights(
+    level: string,
+    message: unknown,
+    context: string | undefined,
+    userId: string | undefined,
+    trace: string | undefined,
+  ): void {
+    const client = getTelemetryClient();
+    if (!client) return;
+
+    const properties: Record<string, string> = { serviceName: SERVICE_NAME };
+    if (context) properties.context = context;
+    if (userId) properties.userId = userId;
+    if (trace) properties.trace = trace;
+
+    client.trackTrace({
+      message: typeof message === 'object' ? JSON.stringify(message) : String(message),
+      severity: SEVERITY[level] ?? Contracts.SeverityLevel.Information,
+      properties,
+    });
   }
 
   log(message: unknown, ...optionalParams: unknown[]): void {

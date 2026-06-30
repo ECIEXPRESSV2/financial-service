@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { StructuredLogger } from './common/logger/structured.logger';
+import { setupAppInsights } from './common/telemetry/app-insights';
 import { swaggerCustomCss, swaggerCustomJs } from './config/swagger-custom-ui';
 import { execSync, exec } from 'child_process';
 import * as fs from 'fs';
@@ -88,6 +89,10 @@ process.on('SIGINT', () => {
 });
 
 async function bootstrap() {
+  // Inicializa Application Insights antes de crear la app para que el SDK pueda
+  // instrumentar HTTP/dependencias. No-op si no hay connection string (local).
+  setupAppInsights();
+
   const app = await NestFactory.create(AppModule, { logger: new StructuredLogger() });
 
   // CORS: el frontend (ECIExpress) llama a este servicio directamente en desarrollo
