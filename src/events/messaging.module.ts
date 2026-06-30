@@ -26,6 +26,8 @@ import { EventPublisherService } from './event-publisher.service';
       provide: SERVICE_BUS_CLIENT,
       inject: [ConfigService],
       useFactory: (config: ConfigService): ServiceBusClient => {
+        const connStr = process.env.SERVICE_BUS_CONNECTION_STRING;
+        if (connStr) return new ServiceBusClient(connStr);
         const fqns = config.getOrThrow<string>(
           'serviceBus.fullyQualifiedNamespace',
         );
