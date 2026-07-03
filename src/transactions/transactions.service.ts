@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import {
   FailureReason,
@@ -19,6 +20,7 @@ import {
 } from '../events/payloads/order.payloads';
 import { DeliveryConfirmedPayload } from '../events/payloads/fulfillment.payloads';
 import { FinancialLogger } from '../common/logger/financial.logger';
+import { ReceiptsService, ReceiptConcept } from '../receipts/receipts.service';
 
 // Código de error de PostgreSQL para violación de unicidad (idempotencia por order_id).
 const PG_UNIQUE_VIOLATION = '23505';
@@ -36,6 +38,8 @@ export class TransactionsService {
     private readonly eventPublisher: EventPublisherService,
     private readonly dataSource: DataSource,
     private readonly financialLogger: FinancialLogger,
+    private readonly receiptsService: ReceiptsService,
+    private readonly config: ConfigService,
   ) {}
 
   // --- Lecturas para los controladores ---
@@ -54,6 +58,34 @@ export class TransactionsService {
   async findByUserId(userId: string): Promise<OrderTransaction[]> {
     const wallet = await this.walletsService.findWalletByUserId(userId);
     return this.findByWalletId(wallet.id);
+  }
+
+  /**
+   * URL de lectura (SAS de corta vida) del comprobante de un pago de pedido. Verifica
+   * que el pedido pertenezca a la billetera del usuario antes de firmar el SAS.
+   */
+  async getReceiptSasUrl(
+    userId: string,
+    orderId: string,
+  ): Promise<{ url: string; expiresInMinutes: number }> {
+    const wallet = await this.walletsService.findWalletByUserId(userId);
+    const tx = await this.findByOrderId(orderId);
+    if (!tx || tx.walletId !== wallet.id) {
+      throw new NotFoundException('Transacción no encontrada.');
+    }
+    if (!tx.receiptBlobPath) {
+      throw new NotFoundException(
+        'Este pago no tiene un comprobante archivado.',
+      );
+    }
+    const url = await this.receiptsService.getReceiptSasUrl(tx.receiptBlobPath);
+    if (!url) {
+      throw new NotFoundException(
+        'No se pudo generar el enlace del comprobante.',
+      );
+    }
+    const ttl = this.config.get<number>('blobStorage.sasTtlMinutes') ?? 60;
+    return { url, expiresInMinutes: ttl };
   }
 
   findByStoreId(storeId: string): Promise<OrderTransaction[]> {
@@ -200,7 +232,14 @@ export class TransactionsService {
       throw error;
     }
 
-    // 6. Publicar el cobro exitoso.
+    // 6. Generar el comprobante de pago (archivado en blob + adjunto para el correo).
+    const receipt = await this.buildOrderReceipt(
+      payload.orderId,
+      payload.buyerId,
+      breakdown.totalCharged,
+    );
+
+    // 7. Publicar el cobro exitoso.
     await this.eventPublisher.publish(PublishedEvents.PAYMENT_PROCESSED, {
       orderId: payload.orderId,
       userId: payload.buyerId, // destinatario para notifications-service
@@ -210,6 +249,8 @@ export class TransactionsService {
       peakFeeAmount: breakdown.peakFeeAmount,
       totalCharged: breakdown.totalCharged,
       isPeakHour: breakdown.isPeakHour,
+      // Adjunto (HTML del comprobante en base64) para el correo de notifications.
+      receipt: receipt?.attachment,
     });
     this.financialLogger.logEvent('order.payment.processed', 'Pago de orden procesado', {
       orderId: payload.orderId,
@@ -222,6 +263,46 @@ export class TransactionsService {
       isPeakHour: breakdown.isPeakHour,
       walletId: wallet.id,
     });
+  }
+
+  /**
+   * Genera el comprobante del pago del pedido, lo archiva en el Blob Storage privado y
+   * persiste su ruta en la transacción (para regenerar el SAS bajo demanda). Nunca
+   * lanza: si algo falla, el cobro ya está hecho y solo se pierde el archivado/adjunto.
+   */
+  private async buildOrderReceipt(
+    orderId: string,
+    buyerId: string,
+    totalCharged: number,
+  ) {
+    try {
+      const walletUser = await this.walletsService.findUserById(buyerId);
+      const receipt = await this.receiptsService.generate(
+        'order_payment',
+        orderId,
+        {
+          concept: ReceiptConcept.ORDER_PAYMENT,
+          amountCents: totalCharged,
+          paymentMethodLabel: 'Billetera ECIExpress',
+          buyer: walletUser?.email ?? buyerId,
+          referenceLabel: 'ID pedido',
+          reference: orderId,
+          date: new Date(),
+        },
+      );
+      if (receipt.blobPath) {
+        await this.txRepository.update(
+          { orderId },
+          { receiptBlobPath: receipt.blobPath },
+        );
+      }
+      return receipt;
+    } catch (error) {
+      this.logger.error(
+        `No se pudo generar el comprobante del pedido ${orderId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 
   /**
