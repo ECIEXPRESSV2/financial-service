@@ -6,8 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, Repository } from 'typeorm';
-import { TopupStatus, WalletTopup } from './entities/wallet-topup.entity';
+import {
+  TopupPaymentMethod,
+  TopupStatus,
+  WalletTopup,
+} from './entities/wallet-topup.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { CreateTopupDto } from './dto/create-topup.dto';
 import { WalletsService } from '../wallets/wallets.service';
@@ -15,6 +20,17 @@ import { WompiService, WompiWebhookEvent } from '../wompi/wompi.service';
 import { EventPublisherService } from '../events/event-publisher.service';
 import { PublishedEvents } from '../events/event-patterns';
 import { FinancialLogger } from '../common/logger/financial.logger';
+import { ReceiptsService, ReceiptConcept } from '../receipts/receipts.service';
+
+/** Etiquetas legibles de los métodos de pago para el comprobante. */
+const PAYMENT_METHOD_LABELS: Record<TopupPaymentMethod, string> = {
+  [TopupPaymentMethod.NEQUI]: 'Nequi',
+  [TopupPaymentMethod.DAVIPLATA]: 'DaviPlata',
+  [TopupPaymentMethod.PSE]: 'PSE',
+  [TopupPaymentMethod.CARD]: 'Tarjeta',
+  [TopupPaymentMethod.BANCOLOMBIA_TRANSFER]: 'Transferencia Bancolombia',
+  [TopupPaymentMethod.BANCOLOMBIA_QR]: 'QR Bancolombia',
+};
 
 @Injectable()
 export class TopupsService {
@@ -28,7 +44,13 @@ export class TopupsService {
     private readonly eventPublisher: EventPublisherService,
     private readonly dataSource: DataSource,
     private readonly financialLogger: FinancialLogger,
+    private readonly receiptsService: ReceiptsService,
+    private readonly config: ConfigService,
   ) {}
+
+  private get sasTtlMinutes(): number {
+    return this.config.get<number>('blobStorage.sasTtlMinutes') ?? 60;
+  }
 
   /**
    * Inicia una recarga: crea el topup PENDING y la transacción en Wompi. NO acredita
@@ -181,6 +203,37 @@ export class TopupsService {
   }
 
   /**
+   * URL de lectura (SAS de corta vida) del comprobante de una recarga. Verifica que la
+   * recarga pertenezca al usuario que la solicita antes de firmar el SAS.
+   */
+  async getReceiptSasUrl(
+    userId: string,
+    topupId: string,
+  ): Promise<{ url: string; expiresInMinutes: number }> {
+    const wallet = await this.walletsService.findWalletByUserId(userId);
+    const topup = await this.topupRepository.findOne({
+      where: { id: topupId, walletId: wallet.id },
+    });
+    if (!topup) {
+      throw new NotFoundException('Recarga no encontrada.');
+    }
+    if (!topup.receiptBlobPath) {
+      throw new NotFoundException(
+        'Esta recarga no tiene un comprobante archivado.',
+      );
+    }
+    const url = await this.receiptsService.getReceiptSasUrl(
+      topup.receiptBlobPath,
+    );
+    if (!url) {
+      throw new NotFoundException(
+        'No se pudo generar el enlace del comprobante.',
+      );
+    }
+    return { url, expiresInMinutes: this.sasTtlMinutes };
+  }
+
+  /**
    * Procesa un evento del webhook de Wompi (la firma ya fue validada en el controlador).
    * Idempotente: el saldo solo se acredita la primera vez que el topup pasa de PENDING
    * a APPROVED, gracias al UPDATE condicional sobre el estado.
@@ -271,6 +324,7 @@ export class TopupsService {
     let credited = false;
     let amount = 0;
     let userId = '';
+    let paymentMethod: TopupPaymentMethod | null = null;
 
     await this.dataSource.transaction(async (manager) => {
       const updateResult = await manager.update(
@@ -295,6 +349,7 @@ export class TopupsService {
         where: { id: topupId },
       });
       amount = topup.amount;
+      paymentMethod = topup.paymentMethod;
       // Resolvemos el dueño de la billetera para que notifications-service pueda
       // notificar al comprador (el evento debe llevar el userId, no solo el walletId).
       const wallet = await manager.findOneOrFail(Wallet, {
@@ -317,14 +372,65 @@ export class TopupsService {
     });
 
     if (credited) {
+      const receipt = await this.buildTopupReceipt(
+        topupId,
+        userId,
+        amount,
+        paymentMethod,
+      );
       await this.eventPublisher.publish(PublishedEvents.WALLET_TOPUP_APPROVED, {
         topupId,
         userId,
         wompiTransactionId,
         amount,
+        // Adjunto (HTML del comprobante en base64) para el correo de notifications.
+        receipt: receipt?.attachment,
       });
     }
 
     return credited;
+  }
+
+  /**
+   * Genera el comprobante de la recarga, lo archiva en el Blob Storage privado y
+   * persiste su ruta en el topup (para regenerar el SAS bajo demanda). Nunca lanza:
+   * si algo falla, la recarga ya está acreditada y solo se pierde el archivado/adjunto.
+   */
+  private async buildTopupReceipt(
+    topupId: string,
+    userId: string,
+    amount: number,
+    paymentMethod: TopupPaymentMethod | null,
+  ) {
+    try {
+      const walletUser = await this.walletsService.findUserById(userId);
+      const receipt = await this.receiptsService.generate(
+        'wallet_topup',
+        userId,
+        {
+          concept: ReceiptConcept.WALLET_TOPUP,
+          amountCents: amount,
+          paymentMethodLabel: paymentMethod
+            ? (PAYMENT_METHOD_LABELS[paymentMethod] ?? paymentMethod)
+            : 'Recarga',
+          buyer: walletUser?.email ?? userId,
+          referenceLabel: 'ID transacción',
+          reference: topupId,
+          date: new Date(),
+        },
+      );
+      if (receipt.blobPath) {
+        await this.topupRepository.update(
+          { id: topupId },
+          { receiptBlobPath: receipt.blobPath },
+        );
+      }
+      return receipt;
+    } catch (error) {
+      this.logger.error(
+        `No se pudo generar el comprobante de la recarga ${topupId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 }

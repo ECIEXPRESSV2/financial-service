@@ -39,8 +39,21 @@ describe('TopupsService.handleWebhookEvent (idempotencia)', () => {
       creditWallet: jest.fn().mockResolvedValue(true),
       // En la ruta DECLINED se resuelve el dueño de la billetera para el evento.
       findWalletById: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'user-1' }),
+      // Al generar el comprobante se resuelve el correo del comprador.
+      findUserById: jest.fn().mockResolvedValue({ id: 'user-1', email: 'user-1@eci.edu.co' }),
     };
     const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    const receiptsService = {
+      generate: jest.fn().mockResolvedValue({
+        blobPath: 'recargas_billeteras/user-1/comprobante-1700000000.html',
+        attachment: {
+          filename: 'comprobante-1700000000.html',
+          contentType: 'text/html; charset=utf-8',
+          contentBase64: 'PGh0bWw+',
+        },
+      }),
+    };
+    const config = { get: jest.fn().mockReturnValue(60) };
 
     // El primer UPDATE condicional (PENDING -> APPROVED) afecta 1 fila; el segundo 0.
     const managerUpdate = jest
@@ -67,8 +80,10 @@ describe('TopupsService.handleWebhookEvent (idempotencia)', () => {
       eventPublisher as any,
       dataSource as any,
       { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
+      receiptsService as any,
+      config as any,
     );
-    return { service, walletsService, eventPublisher };
+    return { service, walletsService, eventPublisher, receiptsService };
   }
 
   it('acredita el saldo una sola vez aunque el webhook APPROVED llegue dos veces', async () => {
