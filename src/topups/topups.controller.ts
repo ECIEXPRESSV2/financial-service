@@ -60,6 +60,20 @@ export class TopupsController {
     return this.wompiService.getFinancialInstitutions();
   }
 
+  @Get(':id/receipt-url')
+  @ApiOperation({
+    summary: 'Enlace temporal (SAS) al comprobante de una recarga.',
+    description:
+      'Devuelve una URL de lectura de corta vida al comprobante archivado en el ' +
+      'Blob Storage privado. Solo el dueño de la recarga puede obtenerla.',
+  })
+  async getTopupReceiptUrl(
+    @CurrentUser() userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.topupsService.getReceiptSasUrl(userId, id);
+  }
+
   // Debe ir DESPUÉS de las rutas estáticas (p. ej. pse-institutions) para no capturarlas.
   @Get(':id')
   @ApiOperation({

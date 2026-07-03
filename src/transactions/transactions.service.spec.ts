@@ -30,10 +30,13 @@ describe('TransactionsService.handleOrderCreated', () => {
     const txRepository = {
       findOne: jest.fn().mockResolvedValue(overrides.existing ?? null),
       insert: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     const walletsService = {
       findWalletByUserIdNullable: jest.fn().mockResolvedValue(activeWallet),
       debitWallet: jest.fn().mockResolvedValue(overrides.debited ?? false),
+      // Al generar el comprobante se resuelve el correo del comprador.
+      findUserById: jest.fn().mockResolvedValue({ id: 'buyer-1', email: 'buyer-1@eci.edu.co' }),
     };
     const storesService = {
       findStore: jest.fn().mockResolvedValue(activeStore),
@@ -42,6 +45,17 @@ describe('TransactionsService.handleOrderCreated', () => {
     const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
     const manager = { insert: jest.fn().mockResolvedValue(undefined) };
     const dataSource = { transaction: jest.fn((cb: any) => cb(manager)) };
+    const receiptsService = {
+      generate: jest.fn().mockResolvedValue({
+        blobPath: 'pagos_pedidos/order-1/comprobante-1700000000.html',
+        attachment: {
+          filename: 'comprobante-1700000000.html',
+          contentType: 'text/html; charset=utf-8',
+          contentBase64: 'PGh0bWw+',
+        },
+      }),
+    };
+    const config = { get: jest.fn().mockReturnValue(60) };
 
     const service = new TransactionsService(
       txRepository as any,
@@ -51,6 +65,8 @@ describe('TransactionsService.handleOrderCreated', () => {
       eventPublisher as any,
       dataSource as any,
       { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
+      receiptsService as any,
+      config as any,
     );
     return { service, txRepository, walletsService, eventPublisher, manager };
   }

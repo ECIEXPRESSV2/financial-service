@@ -64,6 +64,10 @@ export class WalletTopup {
   @Column({ name: 'wompi_response', type: 'jsonb', nullable: true })
   wompiResponse?: Record<string, any> | null;
 
+  // Ruta del comprobante en el Blob Storage privado (para regenerar su SAS de lectura).
+  @Column({ name: 'receipt_blob_path', type: 'varchar', nullable: true })
+  receiptBlobPath?: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

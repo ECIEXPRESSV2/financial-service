@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
 import { wompiConfig } from './config/wompi.config';
 import { serviceBusConfig } from './config/service-bus.config';
+import { blobStorageConfig } from './config/blob-storage.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LoggerModule } from './common/logger/logger.module';
@@ -16,13 +17,14 @@ import { StoresModule } from './stores/stores.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { WompiModule } from './wompi/wompi.module';
+import { ReceiptsModule } from './receipts/receipts.module';
 
 @Module({
   imports: [
     LoggerModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, wompiConfig, serviceBusConfig],
+      load: [databaseConfig, wompiConfig, serviceBusConfig, blobStorageConfig],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -32,6 +34,7 @@ import { WompiModule } from './wompi/wompi.module';
         configService.getOrThrow('database'),
     }),
     MessagingModule,
+    ReceiptsModule,
     WalletsModule,
     TopupsModule,
     StoresModule,
