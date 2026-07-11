@@ -1,24 +1,22 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
-  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { IdentityClient } from '../clients/identity.client';
 
 /**
- * Guard placeholder para endpoints de administración.
- *
- * TODO: cuando Identity defina el modelo de roles, validar aquí que el `x-user-id`
- * (o un header/claim de rol que inyecte el API Gateway) corresponda a un
- * administrador de ECIExpress. Por ahora solo exige la presencia del header y deja
- * pasar la petición.
+ * Autoriza los endpoints de administración de ECIExpress: solo usuarios con rol global
+ * `ADMIN`. El rol NO viaja en headers hacia financial, así que se consulta a identity con el
+ * `x-user-id` que inyecta el gateway. Fail-closed: si no se puede verificar el rol, se niega.
  */
 @Injectable()
 export class AdminGuard implements CanActivate {
-  private readonly logger = new Logger(AdminGuard.name);
+  constructor(private readonly identity: IdentityClient) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<{ headers: Record<string, string | undefined> }>();
@@ -30,10 +28,12 @@ export class AdminGuard implements CanActivate {
       );
     }
 
-    // TODO: validar rol admin real contra el contrato que defina Identity.
-    this.logger.warn(
-      `AdminGuard placeholder: acceso admin permitido a x-user-id=${userId} sin validar rol.`,
-    );
+    const roles = await this.identity.getUserRoles(userId);
+    if (!roles.includes('ADMIN')) {
+      throw new ForbiddenException(
+        'Se requiere rol de administrador de ECIExpress.',
+      );
+    }
     return true;
   }
 }
