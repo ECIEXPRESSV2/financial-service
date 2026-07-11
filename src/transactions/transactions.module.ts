@@ -8,6 +8,7 @@ import { AdminTransactionsController } from './admin-transactions.controller';
 import { WalletsModule } from '../wallets/wallets.module';
 import { StoresModule } from '../stores/stores.module';
 import { PayoutsModule } from '../payouts/payouts.module';
+import { AuthModule } from '../common/auth/auth.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PayoutsModule } from '../payouts/payouts.module';
     WalletsModule,
     StoresModule,
     PayoutsModule,
+    AuthModule,
   ],
   controllers: [
     WalletTransactionsController,

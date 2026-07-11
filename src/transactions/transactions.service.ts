@@ -7,7 +7,7 @@ import {
   OrderTransaction,
   OrderTransactionStatus,
 } from './entities/order-transaction.entity';
-import { computeCommissions, isPeakHour } from './pricing.util';
+import { isPeakHour } from './pricing.util';
 import { WalletsService } from '../wallets/wallets.service';
 import { StoresService } from '../stores/stores.service';
 import { PayoutService } from '../payouts/payout.service';
@@ -24,6 +24,27 @@ import { ReceiptsService, ReceiptConcept } from '../receipts/receipts.service';
 
 // Código de error de PostgreSQL para violación de unicidad (idempotencia por order_id).
 const PG_UNIQUE_VIOLATION = '23505';
+
+/** Agregado de montos (centavos COP) de un conjunto de transacciones. */
+export interface EarningsBucket {
+  count: number;
+  /** Valor bruto de los pedidos (SUM order_amount). */
+  grossAmount: number;
+  /** Descuento por uso de la app (SUM platform_fee_amount). */
+  platformFeeAmount: number;
+  /** Neto que recibe el negocio (SUM store_payout_amount). */
+  netAmount: number;
+}
+
+/** Resumen de ganancias del negocio en el mes en curso. */
+export interface StoreEarnings {
+  month: string; // 'YYYY-MM'
+  currency: 'COP';
+  platformFeePercent: number;
+  received: EarningsBucket; // RELEASED: ya desembolsado
+  pending: EarningsBucket; // HELD: se libera al entregar
+  totals: EarningsBucket;
+}
 
 @Injectable()
 export class TransactionsService {
@@ -113,6 +134,62 @@ export class TransactionsService {
     return { released, pending };
   }
 
+  /**
+   * Resumen de ganancias del negocio en el mes en curso, para el panel del vendedor.
+   * Agrega las transacciones por estado: RELEASED = ya recibido, HELD = pendiente de
+   * entrega. Devuelve el bruto (valor de los pedidos), lo que ECIExpress descuenta por
+   * uso de la app (comisión de plataforma) y lo neto que recibe el negocio.
+   */
+  async getStoreEarnings(storeId: string): Promise<StoreEarnings> {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthLabel = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const sumFor = async (
+      status: OrderTransactionStatus,
+    ): Promise<EarningsBucket> => {
+      const row = await this.txRepository
+        .createQueryBuilder('tx')
+        .select('COUNT(*)', 'count')
+        .addSelect('COALESCE(SUM(tx.order_amount), 0)', 'gross')
+        .addSelect('COALESCE(SUM(tx.platform_fee_amount), 0)', 'fee')
+        .addSelect('COALESCE(SUM(tx.store_payout_amount), 0)', 'net')
+        .where('tx.store_id = :storeId', { storeId })
+        .andWhere('tx.status = :status', { status })
+        .andWhere('tx.created_at >= :monthStart', { monthStart })
+        .getRawOne<{ count: string; gross: string; fee: string; net: string }>();
+      return {
+        count: parseInt(row?.count ?? '0', 10),
+        grossAmount: parseInt(row?.gross ?? '0', 10),
+        platformFeeAmount: parseInt(row?.fee ?? '0', 10),
+        netAmount: parseInt(row?.net ?? '0', 10),
+      };
+    };
+
+    const [received, pending] = await Promise.all([
+      sumFor(OrderTransactionStatus.RELEASED),
+      sumFor(OrderTransactionStatus.HELD),
+    ]);
+
+    const totals: EarningsBucket = {
+      count: received.count + pending.count,
+      grossAmount: received.grossAmount + pending.grossAmount,
+      platformFeeAmount: received.platformFeeAmount + pending.platformFeeAmount,
+      netAmount: received.netAmount + pending.netAmount,
+    };
+
+    const store = await this.storesService.findStore(storeId);
+
+    return {
+      month: monthLabel,
+      currency: 'COP',
+      platformFeePercent: store?.platformFeePercent ?? 0,
+      received,
+      pending,
+      totals,
+    };
+  }
+
   /** Listado admin con filtros opcionales por estado y rango de fechas de creación. */
   async findAll(filters: {
     status?: OrderTransactionStatus;
@@ -168,18 +245,41 @@ export class TransactionsService {
       return;
     }
 
-    // 4. Evaluar hora pico (en America/Bogota) y calcular el desglose de montos.
-    const peak = isPeakHour(new Date(), {
-      peakDays: store.peakDays,
-      peakHoursStart: store.peakHoursStart,
-      peakHoursEnd: store.peakHoursEnd,
-    });
-    const breakdown = computeCommissions({
-      orderAmount: payload.totalAmount,
-      platformFeePercent: store.platformFeePercent,
-      peakFeePercent: store.peakFeePercent,
-      isPeak: peak,
-    });
+    // 4. Calcular el desglose de montos. El recargo de hora pico lo FIJA orders-service en el
+    //    checkout (el precio que vio el comprador == el que se cobra); financial no lo recalcula.
+    //    Solo deriva la comisión de plataforma (su responsabilidad) sobre el valor de los productos.
+    //    Retrocompat: si el evento no trae el desglose, `orderAmount` cae a `totalAmount` y se
+    //    reevalúa la hora pico como antes.
+    let orderAmount: number;
+    let peakFeeAmount: number;
+    let peak: boolean;
+    if (payload.orderAmount !== undefined) {
+      orderAmount = payload.orderAmount;
+      peakFeeAmount = payload.peakFeeAmount ?? 0;
+      peak = payload.isPeakHour ?? peakFeeAmount > 0;
+    } else {
+      // Evento legado: solo trae totalAmount como base; se recalcula el pico como antes.
+      orderAmount = payload.totalAmount;
+      peak = isPeakHour(new Date(), {
+        peakDays: store.peakDays,
+        peakHoursStart: store.peakHoursStart,
+        peakHoursEnd: store.peakHoursEnd,
+      });
+      peakFeeAmount = peak
+        ? Math.round((orderAmount * store.peakFeePercent) / 100)
+        : 0;
+    }
+    const platformFeeAmount = Math.round(
+      (orderAmount * store.platformFeePercent) / 100,
+    );
+    const breakdown = {
+      orderAmount,
+      peakFeeAmount,
+      totalCharged: orderAmount + peakFeeAmount,
+      platformFeeAmount,
+      storePayoutAmount: orderAmount - platformFeeAmount,
+      isPeakHour: peak,
+    };
 
     // 5. Debitar y crear la transacción HELD de forma atómica.
     try {
@@ -318,7 +418,7 @@ export class TransactionsService {
         orderId: payload.orderId,
         walletId: walletId ?? payload.buyerId,
         storeId: payload.storeId,
-        orderAmount: payload.totalAmount,
+        orderAmount: payload.orderAmount ?? payload.totalAmount,
         peakFeeAmount: 0,
         totalCharged: 0,
         platformFeeAmount: 0,

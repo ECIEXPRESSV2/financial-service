@@ -4,11 +4,34 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
 import { UpdateCommissionConfigDto } from './dto/update-commission-config.dto';
+import { UpdatePeakConfigDto } from './dto/update-peak-config.dto';
 import { UpdatePayoutAccountDto } from './dto/update-payout-account.dto';
+import { computeCommissions, isPeakHour } from '../transactions/pricing.util';
 import {
   StoreUpsertedPayload,
   StoreStatusChangedPayload,
 } from '../events/payloads/identity.payloads';
+
+/**
+ * Info de comisiones de un negocio para mostrar en la factura del comprador y en el panel
+ * del vendedor. Si se cotiza un `amount` (centavos COP) se incluyen los montos calculados.
+ */
+export interface StoreCommissionInfo {
+  storeId: string;
+  platformFeePercent: number;
+  peakFeePercent: number;
+  isPeakHour: boolean;
+  peakHoursStart: string | null;
+  peakHoursEnd: string | null;
+  peakDays: string[] | null;
+  orderAmount: number;
+  /** Recargo de hora pico que paga el comprador (0 si no es hora pico o no se cotizó monto). */
+  peakFeeAmount: number;
+  /** Comisión de plataforma que se descuenta al negocio (informativa; no la paga el comprador). */
+  platformFeeAmount: number;
+  /** Total que se debita del comprador = orderAmount + peakFeeAmount. */
+  totalCharged: number;
+}
 
 @Injectable()
 export class StoresService {
@@ -48,6 +71,71 @@ export class StoresService {
     store.payoutBankCode = dto.bankCode ?? null;
     store.payoutHolderName = dto.holderName;
     return this.storeRepository.save(store);
+  }
+
+  /**
+   * Actualiza SOLO la hora pico (franja + recargo) del propio negocio. Lo usa el vendedor
+   * desde su panel, igual que mueve su horario. No toca la comisión de plataforma.
+   */
+  async updatePeakConfig(
+    storeId: string,
+    dto: UpdatePeakConfigDto,
+  ): Promise<Store> {
+    const store = await this.findStoreOrThrow(storeId);
+
+    if (dto.peakFeePercent !== undefined) {
+      store.peakFeePercent = dto.peakFeePercent;
+    }
+    if (dto.peakHoursStart !== undefined) {
+      store.peakHoursStart = dto.peakHoursStart;
+    }
+    if (dto.peakHoursEnd !== undefined) {
+      store.peakHoursEnd = dto.peakHoursEnd;
+    }
+    if (dto.peakDays !== undefined) {
+      store.peakDays = dto.peakDays;
+    }
+
+    return this.storeRepository.save(store);
+  }
+
+  /**
+   * Devuelve la configuración de comisiones del negocio, si es hora pico AHORA
+   * (America/Bogota) y —cuando se pasa `amount` (centavos COP)— los montos calculados.
+   * La consume orders-service para cotizar la factura y el panel del vendedor para
+   * mostrar su hora pico.
+   */
+  async getCommissionInfo(
+    storeId: string,
+    amount = 0,
+  ): Promise<StoreCommissionInfo> {
+    const store = await this.findStoreOrThrow(storeId);
+    const peak = isPeakHour(new Date(), {
+      peakDays: store.peakDays,
+      peakHoursStart: store.peakHoursStart,
+      peakHoursEnd: store.peakHoursEnd,
+    });
+    const orderAmount = Math.max(0, Math.round(amount));
+    const breakdown = computeCommissions({
+      orderAmount,
+      platformFeePercent: store.platformFeePercent,
+      peakFeePercent: store.peakFeePercent,
+      isPeak: peak,
+    });
+
+    return {
+      storeId: store.id,
+      platformFeePercent: store.platformFeePercent,
+      peakFeePercent: store.peakFeePercent,
+      isPeakHour: peak,
+      peakHoursStart: store.peakHoursStart ?? null,
+      peakHoursEnd: store.peakHoursEnd ?? null,
+      peakDays: store.peakDays ?? null,
+      orderAmount: breakdown.orderAmount,
+      peakFeeAmount: breakdown.peakFeeAmount,
+      platformFeeAmount: breakdown.platformFeeAmount,
+      totalCharged: breakdown.totalCharged,
+    };
   }
 
   // --- Endpoints de administración ---

@@ -4,9 +4,10 @@ import { Store } from './entities/store.entity';
 import { StoresService } from './stores.service';
 import { StoresController } from './stores.controller';
 import { AdminStoresController } from './admin-stores.controller';
+import { AuthModule } from '../common/auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Store])],
+  imports: [TypeOrmModule.forFeature([Store]), AuthModule],
   controllers: [StoresController, AdminStoresController],
   providers: [StoresService],
   exports: [StoresService],
