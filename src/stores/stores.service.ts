@@ -4,7 +4,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
 import { UpdateCommissionConfigDto } from './dto/update-commission-config.dto';
-import { UpdatePeakConfigDto } from './dto/update-peak-config.dto';
 import { UpdatePayoutAccountDto } from './dto/update-payout-account.dto';
 import { computeCommissions, isPeakHour } from '../transactions/pricing.util';
 import {
@@ -70,32 +69,6 @@ export class StoresService {
     store.payoutAccountNumber = dto.accountNumber;
     store.payoutBankCode = dto.bankCode ?? null;
     store.payoutHolderName = dto.holderName;
-    return this.storeRepository.save(store);
-  }
-
-  /**
-   * Actualiza SOLO la hora pico (franja + recargo) del propio negocio. Lo usa el vendedor
-   * desde su panel, igual que mueve su horario. No toca la comisión de plataforma.
-   */
-  async updatePeakConfig(
-    storeId: string,
-    dto: UpdatePeakConfigDto,
-  ): Promise<Store> {
-    const store = await this.findStoreOrThrow(storeId);
-
-    if (dto.peakFeePercent !== undefined) {
-      store.peakFeePercent = dto.peakFeePercent;
-    }
-    if (dto.peakHoursStart !== undefined) {
-      store.peakHoursStart = dto.peakHoursStart;
-    }
-    if (dto.peakHoursEnd !== undefined) {
-      store.peakHoursEnd = dto.peakHoursEnd;
-    }
-    if (dto.peakDays !== undefined) {
-      store.peakDays = dto.peakDays;
-    }
-
     return this.storeRepository.save(store);
   }
 
