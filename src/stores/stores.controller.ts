@@ -6,14 +6,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CurrentStore } from '../common/decorators/current-store.decorator';
-import { StoreStaffGuard } from '../common/guards/store-staff.guard';
 import { StoresService, StoreCommissionInfo } from './stores.service';
 import { UpdatePayoutAccountDto } from './dto/update-payout-account.dto';
-import { UpdatePeakConfigDto } from './dto/update-peak-config.dto';
 import { Store } from './entities/store.entity';
 
 @ApiTags('Stores')
@@ -31,19 +28,6 @@ export class StoresController {
     @Body() dto: UpdatePayoutAccountDto,
   ): Promise<Store> {
     return this.storesService.updatePayoutAccount(storeId, dto);
-  }
-
-  @Patch(':storeId/peak-config')
-  @UseGuards(StoreStaffGuard)
-  @ApiOperation({
-    summary:
-      'Actualizar la hora pico (franja + recargo) de un negocio. Solo su staff o dueño.',
-  })
-  async updatePeakConfig(
-    @Param('storeId', ParseUUIDPipe) storeId: string,
-    @Body() dto: UpdatePeakConfigDto,
-  ): Promise<Store> {
-    return this.storesService.updatePeakConfig(storeId, dto);
   }
 
   @Get(':storeId/commission')
