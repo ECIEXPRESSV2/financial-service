@@ -8,9 +8,10 @@ import {
 import { IdentityClient } from '../clients/identity.client';
 
 /**
- * Autoriza operaciones sobre la configuración de una tienda (ej. la hora pico) a: los usuarios
- * que pertenecen a esa tienda (staff activo o dueño, según identity) O a un ADMIN de ECIExpress.
- * El `storeId` se toma del parámetro de ruta y el `x-user-id` del header que inyecta el gateway.
+ * Autoriza LEER información de una tienda (ej. sus ganancias) a: los usuarios que pertenecen a
+ * esa tienda (staff activo o dueño, según identity), a un ADMIN de ECIExpress, o a un ANALYST
+ * (rol de solo lectura del centro de analíticas). El `storeId` se toma del parámetro de ruta y
+ * el `x-user-id` del header que inyecta el gateway.
  */
 @Injectable()
 export class StoreStaffGuard implements CanActivate {
@@ -34,16 +35,16 @@ export class StoreStaffGuard implements CanActivate {
       throw new ForbiddenException('No se pudo determinar la tienda.');
     }
 
-    // Un ADMIN de la plataforma puede editar cualquier tienda; el staff/dueño solo la suya.
+    // ADMIN/ANALYST pueden ver cualquier tienda; el staff/dueño solo la suya.
     const [roles, members] = await Promise.all([
       this.identity.getUserRoles(userId),
       this.identity.getStoreMembers(storeId),
     ]);
-    if (roles.includes('ADMIN') || members.includes(userId)) {
+    if (roles.includes('ADMIN') || roles.includes('ANALYST') || members.includes(userId)) {
       return true;
     }
     throw new ForbiddenException(
-      'No perteneces al staff de esta tienda; no puedes editar su configuración.',
+      'No perteneces al staff de esta tienda; no puedes ver su configuración.',
     );
   }
 }
