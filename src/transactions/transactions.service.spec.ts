@@ -127,3 +127,179 @@ describe('TransactionsService.handleOrderCreated', () => {
     );
   });
 });
+
+describe('TransactionsService.handleOrderCancelled', () => {
+  // orderAmount 100000, peakFeeAmount 10000 (hora pico), totalCharged 110000,
+  // platformFeeAmount 5000, storePayoutAmount 95000 (= orderAmount - platformFeeAmount).
+  const heldTx = {
+    orderId: 'order-1',
+    walletId: 'wallet-1',
+    storeId: 'store-1',
+    orderAmount: 100000,
+    peakFeeAmount: 10000,
+    totalCharged: 110000,
+    platformFeeAmount: 5000,
+    storePayoutAmount: 95000,
+    refundedAmount: 0,
+    status: OrderTransactionStatus.HELD,
+  };
+
+  function buildService(tx: Partial<typeof heldTx> = {}) {
+    const merged = { ...heldTx, ...tx };
+    const txRepository = { findOne: jest.fn().mockResolvedValue(merged) };
+    const walletsService = {
+      creditWallet: jest.fn().mockResolvedValue(undefined),
+      findWalletById: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'buyer-1' }),
+    };
+    const storesService = { findStore: jest.fn().mockResolvedValue({ id: 'store-1' }) };
+    const payoutService = { disburse: jest.fn() };
+    const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    const manager = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    const dataSource = { transaction: jest.fn((cb: any) => cb(manager)) };
+
+    const service = new TransactionsService(
+      txRepository as any,
+      walletsService as any,
+      storesService as any,
+      payoutService as any,
+      eventPublisher as any,
+      dataSource as any,
+      { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, walletsService, storesService, payoutService, eventPublisher, manager };
+  }
+
+  it('sin refundPolicy: reembolsa el 100% al comprador y no libera nada al negocio (comportamiento histórico)', async () => {
+    const { service, walletsService, payoutService, manager, eventPublisher } = buildService();
+
+    await service.handleOrderCancelled({ orderId: 'order-1' });
+
+    expect(walletsService.creditWallet).toHaveBeenCalledWith('wallet-1', 110000, expect.anything());
+    expect(payoutService.disburse).not.toHaveBeenCalled();
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: OrderTransactionStatus.HELD }),
+      expect.objectContaining({ status: OrderTransactionStatus.REFUNDED, refundedAmount: 110000 }),
+    );
+    expect(eventPublisher.publish).toHaveBeenCalledWith(
+      PublishedEvents.REFUND_ISSUED,
+      expect.objectContaining({ refundedAmount: 110000 }),
+    );
+  });
+
+  it('HALF_PRODUCTS_ONLY: reembolsa la mitad de productos y libera la mitad del payout al negocio', async () => {
+    const { service, walletsService, storesService, payoutService, manager, eventPublisher } = buildService();
+
+    await service.handleOrderCancelled({ orderId: 'order-1', refundPolicy: 'HALF_PRODUCTS_ONLY' });
+
+    // Mitad de orderAmount (100000) al comprador; la hora pico (10000) se pierde por completo.
+    expect(walletsService.creditWallet).toHaveBeenCalledWith('wallet-1', 50000, expect.anything());
+    // Mitad de storePayoutAmount (95000) al negocio.
+    expect(storesService.findStore).toHaveBeenCalledWith('store-1');
+    expect(payoutService.disburse).toHaveBeenCalledWith(expect.objectContaining({ id: 'store-1' }), 'store-1', 47500);
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        status: OrderTransactionStatus.RELEASED,
+        refundedAmount: 50000,
+        storePayoutAmount: 47500,
+      }),
+    );
+    expect(eventPublisher.publish).toHaveBeenCalledWith(
+      PublishedEvents.REFUND_ISSUED,
+      expect.objectContaining({ refundedAmount: 50000 }),
+    );
+  });
+
+  it('NO_REFUND: el comprador no recibe nada y el negocio recibe el payout completo', async () => {
+    const { service, walletsService, payoutService, manager, eventPublisher } = buildService();
+
+    await service.handleOrderCancelled({ orderId: 'order-1', refundPolicy: 'NO_REFUND' });
+
+    expect(walletsService.creditWallet).not.toHaveBeenCalled();
+    expect(payoutService.disburse).toHaveBeenCalledWith(expect.anything(), 'store-1', 95000);
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        status: OrderTransactionStatus.RELEASED,
+        refundedAmount: 0,
+        storePayoutAmount: 95000,
+      }),
+    );
+    expect(eventPublisher.publish).not.toHaveBeenCalled();
+  });
+
+  it('no hace nada si la transacción ya está RELEASED (la entrega ya ocurrió)', async () => {
+    const { service, walletsService, payoutService } = buildService({ status: OrderTransactionStatus.RELEASED });
+
+    await service.handleOrderCancelled({ orderId: 'order-1', refundPolicy: 'HALF_PRODUCTS_ONLY' });
+
+    expect(walletsService.creditWallet).not.toHaveBeenCalled();
+    expect(payoutService.disburse).not.toHaveBeenCalled();
+  });
+});
+
+describe('TransactionsService.handleReturnConfirmed', () => {
+  const heldTx = {
+    orderId: 'order-1',
+    walletId: 'wallet-1',
+    storeId: 'store-1',
+    orderAmount: 100000,
+    peakFeeAmount: 10000,
+    totalCharged: 110000,
+    refundedAmount: 0,
+    status: OrderTransactionStatus.HELD,
+  };
+
+  function buildService(tx: Partial<typeof heldTx> = {}) {
+    const merged = { ...heldTx, ...tx };
+    const txRepository = { findOne: jest.fn().mockResolvedValue(merged) };
+    const walletsService = { creditWallet: jest.fn().mockResolvedValue(undefined) };
+    const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    const manager = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    const dataSource = { transaction: jest.fn((cb: any) => cb(manager)) };
+
+    const service = new TransactionsService(
+      txRepository as any,
+      walletsService as any,
+      {} as any,
+      {} as any,
+      eventPublisher as any,
+      dataSource as any,
+      { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, walletsService, eventPublisher, manager };
+  }
+
+  it('full=true reembolsa TODO lo que queda de total_charged, incluida la hora pico (no solo lo que cotizó products)', async () => {
+    const { service, walletsService, manager } = buildService();
+
+    // products solo conoce precios de producto: cotiza 100000 (sin el pico de 10000).
+    await service.handleReturnConfirmed({
+      orderId: 'order-1', buyerId: 'buyer-1', storeId: 'store-1', full: true, refundAmount: 100000,
+    });
+
+    expect(walletsService.creditWallet).toHaveBeenCalledWith('wallet-1', 110000, expect.anything());
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ refundedAmount: 110000, status: OrderTransactionStatus.REFUNDED }),
+    );
+  });
+
+  it('full=false respeta el monto cotizado por products, acotado a lo que quede', async () => {
+    const { service, walletsService } = buildService();
+
+    await service.handleReturnConfirmed({
+      orderId: 'order-1', buyerId: 'buyer-1', storeId: 'store-1', full: false, refundAmount: 30000,
+    });
+
+    expect(walletsService.creditWallet).toHaveBeenCalledWith('wallet-1', 30000, expect.anything());
+  });
+});

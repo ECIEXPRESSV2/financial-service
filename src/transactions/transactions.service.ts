@@ -532,8 +532,13 @@ export class TransactionsService {
       this.logger.warn(`Orden ${payload.orderId} ya reembolsada por completo; ignorado.`);
       return;
     }
-    // El monto reembolsado nunca excede lo cobrado.
-    const amount = Math.min(Math.max(payload.refundAmount, 0), remaining);
+    // Devolución total: se reembolsa TODO lo que quede de total_charged (incluida la comisión
+    // de hora pico), no solo lo que cotizó products — products no conoce el recargo de hora
+    // pico (solo ve precios de producto), así que su `refundAmount` para `full=true` siempre
+    // excluiría el pico. Parcial: se respeta el monto cotizado, acotado a lo que quede.
+    const amount = payload.full
+      ? remaining
+      : Math.min(Math.max(payload.refundAmount, 0), remaining);
     if (amount <= 0) {
       this.logger.warn(`Monto de devolución no válido para ${payload.orderId}; ignorado.`);
       return;
@@ -587,6 +592,31 @@ export class TransactionsService {
 
   // --- Handler de reembolso: order.order.cancelled ---
 
+  /**
+   * Calcula cuánto se reembolsa al comprador y cuánto se libera al negocio según la política de
+   * cancelación. Sin política (comportamiento histórico): 100% al comprador, nada al negocio —
+   * la venta se reversa por completo. 'HALF_PRODUCTS_ONLY': el comprador recupera la mitad del
+   * valor de productos; la otra mitad (más la comisión de hora pico completa) se libera al
+   * negocio, que ya empezó a preparar el pedido. 'NO_REFUND': el negocio ya preparó el 100% del
+   * pedido (venció el QR) — se le libera todo, el comprador no recibe nada.
+   */
+  private computeCancellationSettlement(
+    tx: OrderTransaction,
+    refundPolicy: OrderCancelledPayload['refundPolicy'],
+  ): { buyerRefund: number; storeRelease: number } {
+    switch (refundPolicy) {
+      case 'HALF_PRODUCTS_ONLY': {
+        const buyerRefund = Math.round(tx.orderAmount / 2);
+        const storeRelease = tx.storePayoutAmount - Math.round(tx.storePayoutAmount / 2);
+        return { buyerRefund, storeRelease };
+      }
+      case 'NO_REFUND':
+        return { buyerRefund: 0, storeRelease: tx.storePayoutAmount };
+      default:
+        return { buyerRefund: tx.totalCharged, storeRelease: 0 };
+    }
+  }
+
   async handleOrderCancelled(payload: OrderCancelledPayload): Promise<void> {
     const tx = await this.findByOrderId(payload.orderId);
     if (!tx) {
@@ -609,41 +639,62 @@ export class TransactionsService {
       return;
     }
 
-    // Transición atómica HELD → REFUNDED + acreditación del total cobrado.
-    const refunded = await this.dataSource.transaction(async (manager) => {
+    const { buyerRefund, storeRelease } = this.computeCancellationSettlement(
+      tx,
+      payload.refundPolicy,
+    );
+    const finalStatus =
+      storeRelease > 0 ? OrderTransactionStatus.RELEASED : OrderTransactionStatus.REFUNDED;
+
+    // Transición atómica HELD → (RELEASED|REFUNDED) + acreditación al comprador y, si aplica,
+    // desembolso al negocio del monto retenido.
+    const settled = await this.dataSource.transaction(async (manager) => {
       const result = await manager.update(
         OrderTransaction,
         { orderId: payload.orderId, status: OrderTransactionStatus.HELD },
-        { status: OrderTransactionStatus.REFUNDED, refundedAt: new Date() },
+        {
+          status: finalStatus,
+          refundedAmount: buyerRefund,
+          refundedAt: buyerRefund > 0 ? new Date() : tx.refundedAt,
+          storePayoutAmount: storeRelease > 0 ? storeRelease : tx.storePayoutAmount,
+          releasedAt: storeRelease > 0 ? new Date() : tx.releasedAt,
+        },
       );
       if (result.affected !== 1) {
         return false; // ya procesada por otro evento concurrente.
       }
-      await this.walletsService.creditWallet(
-        tx.walletId,
-        tx.totalCharged,
-        manager,
-      );
+      if (buyerRefund > 0) {
+        await this.walletsService.creditWallet(tx.walletId, buyerRefund, manager);
+      }
       return true;
     });
 
-    if (!refunded) {
+    if (!settled) {
       this.logger.warn(`Orden ${payload.orderId} ya reembolsada; ignorado.`);
       return;
     }
 
-    // Resolvemos el dueño de la billetera para que el evento lleve el destinatario.
-    const refundWallet = await this.walletsService.findWalletById(tx.walletId);
-    await this.eventPublisher.publish(PublishedEvents.REFUND_ISSUED, {
+    if (storeRelease > 0) {
+      const store = await this.storesService.findStore(tx.storeId);
+      this.payoutService.disburse(store, tx.storeId, storeRelease);
+    }
+
+    if (buyerRefund > 0) {
+      // Resolvemos el dueño de la billetera para que el evento lleve el destinatario.
+      const refundWallet = await this.walletsService.findWalletById(tx.walletId);
+      await this.eventPublisher.publish(PublishedEvents.REFUND_ISSUED, {
+        orderId: payload.orderId,
+        userId: refundWallet?.userId,
+        walletId: tx.walletId,
+        refundedAmount: buyerRefund,
+      });
+    }
+    this.financialLogger.logEvent('order.payment.refunded', 'Pedido cancelado liquidado', {
       orderId: payload.orderId,
-      userId: refundWallet?.userId,
       walletId: tx.walletId,
-      refundedAmount: tx.totalCharged,
-    });
-    this.financialLogger.logEvent('order.payment.refunded', 'Pago reembolsado al comprador', {
-      orderId: payload.orderId,
-      walletId: tx.walletId,
-      refundedAmount: tx.totalCharged,
+      refundPolicy: payload.refundPolicy ?? 'FULL_REFUND',
+      buyerRefund,
+      storeRelease,
     });
   }
 }
