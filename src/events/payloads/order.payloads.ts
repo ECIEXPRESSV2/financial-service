@@ -24,6 +24,14 @@ export interface OrderCreatedPayload {
 /** Payload de `order.order.cancelled`. */
 export interface OrderCancelledPayload {
   orderId: string;
+  /**
+   * Política de reembolso fijada por orders-service. Ausente = reembolso del 100% (comportamiento
+   * histórico). 'HALF_PRODUCTS_ONLY' = cancelación del cliente antes de listo-para-retirar (50%
+   * de productos al comprador, el resto se libera al negocio; se pierde la hora pico).
+   * 'NO_REFUND' = venció el QR de retiro (el negocio ya preparó el pedido: se le libera el 100%,
+   * el comprador no recibe nada).
+   */
+  refundPolicy?: 'HALF_PRODUCTS_ONLY' | 'NO_REFUND';
 }
 
 /**
