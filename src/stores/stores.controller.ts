@@ -18,6 +18,14 @@ import { Store } from './entities/store.entity';
 export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
+  @Get('payout-account')
+  @ApiOperation({
+    summary: 'Cuenta de desembolso configurada del negocio (header x-store-id).',
+  })
+  async getPayoutAccount(@CurrentStore() storeId: string): Promise<Store> {
+    return this.storesService.findStoreOrThrow(storeId);
+  }
+
   @Patch('payout-account')
   @ApiOperation({
     summary:

@@ -6,6 +6,7 @@ import { Wallet } from '../wallets/entities/wallet.entity';
 import { WalletTopup } from '../topups/entities/wallet-topup.entity';
 import { Store } from '../stores/entities/store.entity';
 import { OrderTransaction } from '../transactions/entities/order-transaction.entity';
+import { StorePayout } from '../settlements/entities/store-payout.entity';
 
 /**
  * Configuración de TypeORM para PostgreSQL en NeonDB.
@@ -20,7 +21,14 @@ export const databaseConfig = registerAs(
     type: 'postgres',
     url: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }, // NeonDB requiere SSL (sslmode=require)
-    entities: [WalletUser, Wallet, WalletTopup, Store, OrderTransaction],
+    entities: [
+      WalletUser,
+      Wallet,
+      WalletTopup,
+      Store,
+      OrderTransaction,
+      StorePayout,
+    ],
     migrations: [join(__dirname, '..', 'database', 'migrations', '*{.ts,.js}')],
     synchronize: false,
     logging: process.env.NODE_ENV === 'development',

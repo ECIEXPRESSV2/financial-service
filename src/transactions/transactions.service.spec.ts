@@ -41,7 +41,6 @@ describe('TransactionsService.handleOrderCreated', () => {
     const storesService = {
       findStore: jest.fn().mockResolvedValue(activeStore),
     };
-    const payoutService = { disburse: jest.fn() };
     const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
     const manager = { insert: jest.fn().mockResolvedValue(undefined) };
     const dataSource = { transaction: jest.fn((cb: any) => cb(manager)) };
@@ -61,7 +60,6 @@ describe('TransactionsService.handleOrderCreated', () => {
       txRepository as any,
       walletsService as any,
       storesService as any,
-      payoutService as any,
       eventPublisher as any,
       dataSource as any,
       { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
@@ -152,7 +150,6 @@ describe('TransactionsService.handleOrderCancelled', () => {
       findWalletById: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'buyer-1' }),
     };
     const storesService = { findStore: jest.fn().mockResolvedValue({ id: 'store-1' }) };
-    const payoutService = { disburse: jest.fn() };
     const eventPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
     const manager = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
     const dataSource = { transaction: jest.fn((cb: any) => cb(manager)) };
@@ -161,23 +158,21 @@ describe('TransactionsService.handleOrderCancelled', () => {
       txRepository as any,
       walletsService as any,
       storesService as any,
-      payoutService as any,
       eventPublisher as any,
       dataSource as any,
       { logEvent: jest.fn(), warnEvent: jest.fn() } as any,
       {} as any,
       {} as any,
     );
-    return { service, walletsService, storesService, payoutService, eventPublisher, manager };
+    return { service, walletsService, storesService, eventPublisher, manager };
   }
 
   it('sin refundPolicy: reembolsa el 100% al comprador y no libera nada al negocio (comportamiento histórico)', async () => {
-    const { service, walletsService, payoutService, manager, eventPublisher } = buildService();
+    const { service, walletsService, manager, eventPublisher } = buildService();
 
     await service.handleOrderCancelled({ orderId: 'order-1' });
 
     expect(walletsService.creditWallet).toHaveBeenCalledWith('wallet-1', 110000, expect.anything());
-    expect(payoutService.disburse).not.toHaveBeenCalled();
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ status: OrderTransactionStatus.HELD }),
@@ -190,15 +185,13 @@ describe('TransactionsService.handleOrderCancelled', () => {
   });
 
   it('HALF_PRODUCTS_ONLY: reembolsa la mitad de productos y libera la mitad del payout al negocio', async () => {
-    const { service, walletsService, storesService, payoutService, manager, eventPublisher } = buildService();
+    const { service, walletsService, manager, eventPublisher } = buildService();
 
     await service.handleOrderCancelled({ orderId: 'order-1', refundPolicy: 'HALF_PRODUCTS_ONLY' });
 
     // Mitad de orderAmount (100000) al comprador; la hora pico (10000) se pierde por completo.
     expect(walletsService.creditWallet).toHaveBeenCalledWith('wallet-1', 50000, expect.anything());
-    // Mitad de storePayoutAmount (95000) al negocio.
-    expect(storesService.findStore).toHaveBeenCalledWith('store-1');
-    expect(payoutService.disburse).toHaveBeenCalledWith(expect.objectContaining({ id: 'store-1' }), 'store-1', 47500);
+    // Mitad de storePayoutAmount (95000) queda disponible para un giro futuro (RELEASED).
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -215,12 +208,11 @@ describe('TransactionsService.handleOrderCancelled', () => {
   });
 
   it('NO_REFUND: el comprador no recibe nada y el negocio recibe el payout completo', async () => {
-    const { service, walletsService, payoutService, manager, eventPublisher } = buildService();
+    const { service, walletsService, manager, eventPublisher } = buildService();
 
     await service.handleOrderCancelled({ orderId: 'order-1', refundPolicy: 'NO_REFUND' });
 
     expect(walletsService.creditWallet).not.toHaveBeenCalled();
-    expect(payoutService.disburse).toHaveBeenCalledWith(expect.anything(), 'store-1', 95000);
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -234,12 +226,11 @@ describe('TransactionsService.handleOrderCancelled', () => {
   });
 
   it('no hace nada si la transacción ya está RELEASED (la entrega ya ocurrió)', async () => {
-    const { service, walletsService, payoutService } = buildService({ status: OrderTransactionStatus.RELEASED });
+    const { service, walletsService } = buildService({ status: OrderTransactionStatus.RELEASED });
 
     await service.handleOrderCancelled({ orderId: 'order-1', refundPolicy: 'HALF_PRODUCTS_ONLY' });
 
     expect(walletsService.creditWallet).not.toHaveBeenCalled();
-    expect(payoutService.disburse).not.toHaveBeenCalled();
   });
 });
 
@@ -266,7 +257,6 @@ describe('TransactionsService.handleReturnConfirmed', () => {
     const service = new TransactionsService(
       txRepository as any,
       walletsService as any,
-      {} as any,
       {} as any,
       eventPublisher as any,
       dataSource as any,

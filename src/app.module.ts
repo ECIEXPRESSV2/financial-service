@@ -5,6 +5,7 @@ import { databaseConfig } from './config/database.config';
 import { wompiConfig } from './config/wompi.config';
 import { serviceBusConfig } from './config/service-bus.config';
 import { blobStorageConfig } from './config/blob-storage.config';
+import { settlementConfig } from './config/settlement.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LoggerModule } from './common/logger/logger.module';
@@ -15,7 +16,7 @@ import { WalletsModule } from './wallets/wallets.module';
 import { TopupsModule } from './topups/topups.module';
 import { StoresModule } from './stores/stores.module';
 import { TransactionsModule } from './transactions/transactions.module';
-import { PayoutsModule } from './payouts/payouts.module';
+import { SettlementsModule } from './settlements/settlements.module';
 import { WompiModule } from './wompi/wompi.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 
@@ -24,7 +25,13 @@ import { ReceiptsModule } from './receipts/receipts.module';
     LoggerModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, wompiConfig, serviceBusConfig, blobStorageConfig],
+      load: [
+        databaseConfig,
+        wompiConfig,
+        serviceBusConfig,
+        blobStorageConfig,
+        settlementConfig,
+      ],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -39,7 +46,7 @@ import { ReceiptsModule } from './receipts/receipts.module';
     TopupsModule,
     StoresModule,
     TransactionsModule,
-    PayoutsModule,
+    SettlementsModule,
     WompiModule,
     EventsModule,
   ],
