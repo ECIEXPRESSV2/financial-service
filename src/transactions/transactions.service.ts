@@ -10,7 +10,6 @@ import {
 import { isPeakHour } from './pricing.util';
 import { WalletsService } from '../wallets/wallets.service';
 import { StoresService } from '../stores/stores.service';
-import { PayoutService } from '../payouts/payout.service';
 import { EventPublisherService } from '../events/event-publisher.service';
 import { PublishedEvents } from '../events/event-patterns';
 import {
@@ -55,7 +54,6 @@ export class TransactionsService {
     private readonly txRepository: Repository<OrderTransaction>,
     private readonly walletsService: WalletsService,
     private readonly storesService: StoresService,
-    private readonly payoutService: PayoutService,
     private readonly eventPublisher: EventPublisherService,
     private readonly dataSource: DataSource,
     private readonly financialLogger: FinancialLogger,
@@ -484,10 +482,6 @@ export class TransactionsService {
       return;
     }
 
-    // Registrar el desembolso al negocio (en sandbox solo se loguea).
-    const store = await this.storesService.findStore(tx.storeId);
-    this.payoutService.disburse(store, tx.storeId, tx.storePayoutAmount);
-
     await this.eventPublisher.publish(PublishedEvents.PAYMENT_RELEASED, {
       orderId: payload.orderId,
       storeId: tx.storeId,
@@ -672,11 +666,6 @@ export class TransactionsService {
     if (!settled) {
       this.logger.warn(`Orden ${payload.orderId} ya reembolsada; ignorado.`);
       return;
-    }
-
-    if (storeRelease > 0) {
-      const store = await this.storesService.findStore(tx.storeId);
-      this.payoutService.disburse(store, tx.storeId, storeRelease);
     }
 
     if (buyerRefund > 0) {

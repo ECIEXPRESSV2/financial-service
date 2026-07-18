@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
 import { UpdateCommissionConfigDto } from './dto/update-commission-config.dto';
 import { UpdatePayoutAccountDto } from './dto/update-payout-account.dto';
@@ -55,6 +55,13 @@ export class StoresService {
 
   async findStore(storeId: string): Promise<Store | null> {
     return this.storeRepository.findOne({ where: { id: storeId } });
+  }
+
+  /** Negocios activos con cuenta de desembolso configurada — candidatos a la liquidación mensual. */
+  findActiveWithPayoutAccount(): Promise<Store[]> {
+    return this.storeRepository.find({
+      where: { isActive: true, payoutType: Not(IsNull()) },
+    });
   }
 
   // --- Endpoints de negocio (header x-store-id) ---
