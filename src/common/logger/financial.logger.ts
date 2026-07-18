@@ -12,7 +12,8 @@ export type FinancialEvent =
   | 'order.payment.processed'
   | 'order.payment.failed'
   | 'order.payment.released'
-  | 'order.payment.refunded';
+  | 'order.payment.refunded'
+  | 'store.payout.settled';
 
 export interface FinancialEventData {
   [key: string]: unknown;

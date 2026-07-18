@@ -134,6 +134,12 @@ export class OrderTransaction {
   @Column({ name: 'receipt_blob_path', type: 'varchar', nullable: true })
   receiptBlobPath?: string | null;
 
+  // Giro (StorePayout) que ya incluyó esta transacción RELEASED. NULL = disponible
+  // para un próximo giro (automático mensual u on-demand); marcarla evita pagarla dos veces.
+  @Index('idx_order_transactions_payout_id')
+  @Column({ name: 'payout_id', type: 'uuid', nullable: true })
+  payoutId?: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
